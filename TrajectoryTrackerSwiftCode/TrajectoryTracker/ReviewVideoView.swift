@@ -31,6 +31,7 @@ struct ReviewVideoView: View {
                         .onDisappear {
                             player.pause()
                         }
+                        .ignoresSafeArea()
                 } else {
                     // Loading state while the URL is being resolved
                     ProgressView("Loading Video...")
@@ -46,8 +47,10 @@ struct ReviewVideoView: View {
                 Button {
                     reviewMode = false
                 } label: {
-                    Text("Retake")
-                }
+                    Image(systemName: "xmark")
+                        .padding()
+                        .tint(.red)
+                }.glassEffect()
                 Spacer()
                 Button {
                     if let filePath = path {
@@ -66,8 +69,10 @@ struct ReviewVideoView: View {
                     reviewMode = false
                     showCamera = false
                 } label: {
-                    Text("Done")
-                }
+                    Image(systemName: "checkmark")
+                        .padding()
+                        .tint(.green)
+                }.glassEffect()
                 
             }
             

@@ -5,12 +5,13 @@
 //  Created by Milo on 6/14/26.
 //
 
-import AVKit
 import SwiftUI
 
 struct AnalysisView: View {
     
     let videoPath: URL
+    
+    @State private var presentingExportFrameConfirmation = false
     
     var body: some View {
         VStack {
@@ -20,29 +21,37 @@ struct AnalysisView: View {
             
         }.navigationTitle("Analysis")
         .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-struct VideoPlayerView: View {
-    
-    let videoPath: URL
-    @State private var player: AVPlayer?
-    
-    var body: some View {
-        if let player = player {
-            VideoPlayer(player: player)
-                .onAppear {
-                    player.play()
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    presentingExportFrameConfirmation = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundStyle(.green)
                 }
-                .onDisappear {
-                    player.pause()
+            }
+        }
+        .alert("Export & Save?", isPresented: $presentingExportFrameConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Yes", role: .confirm) {
+                Task {
+                    do {
+                        try await exportVideoFrames(videoURL: videoPath)
+                    } catch ExportVideoError.generatorError(message: let message) {
+                        print("Generator Image Creation Error - \(message)")
+                    } catch ExportVideoError.imageConversionError(message: let message) {
+                        print("Image Conversion Error - \(message)")
+                    } catch ExportVideoError.imageSavingError(message: let message) {
+                        print("Image Saving Error - \(message)")
+                    } catch ExportVideoError.videoTrackLoadingFailure(message: let message) {
+                        print("Video Track Loading Error - \(message)")
+                    } catch ExportVideoError.folderCreationError(message: let message) {
+                        print("Folder Creation Error - \(message)")
+                    } catch {
+                        print("Unknown error: \(error.localizedDescription)")
+                    }
                 }
-        } else {
-            ProgressView("Loading Video...")
-                .onAppear {
-                    player = AVPlayer(url: videoPath)
-                }
+            }
         }
     }
-    
 }

@@ -10,9 +10,22 @@
 		CAAF5F242FC937BD00690DF5 /* TrajectoryTracker.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TrajectoryTracker.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		CAA8F50F2FEE23920027AA58 /* Exceptions for "TrajectoryTracker" folder in "TrajectoryTracker" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = CAAF5F232FC937BD00690DF5 /* TrajectoryTracker */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		CAAF5F262FC937BD00690DF5 /* TrajectoryTracker */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				CAA8F50F2FEE23920027AA58 /* Exceptions for "TrajectoryTracker" folder in "TrajectoryTracker" target */,
+			);
 			path = TrajectoryTracker;
 			sourceTree = "<group>";
 		};
@@ -256,6 +269,8 @@
 				DEVELOPMENT_TEAM = 687WHS763Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TrajectoryTracker/Info.plist;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to record tennis ball tracking video";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Used to record video with audio";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -290,6 +305,8 @@
 				DEVELOPMENT_TEAM = 687WHS763Y;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TrajectoryTracker/Info.plist;
+				INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Used to record tennis ball tracking video";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Used to record video with audio";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
