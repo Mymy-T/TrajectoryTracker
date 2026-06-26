@@ -53,14 +53,19 @@ func exportVideoFrames(videoURL: URL) async throws {
     let frameDuration = 1.0 / Double(nominalFrameRate)
     let totalDuration = CMTimeGetSeconds(duration)
     let totalFrames = Int(round(totalDuration * Double(nominalFrameRate)))
-    let toleranceTime = CMTime(seconds: frameDuration / 2.0, preferredTimescale: timescale)
-    generator.requestedTimeToleranceBefore = toleranceTime
-    generator.requestedTimeToleranceAfter = toleranceTime
+//    let toleranceTime = CMTime(seconds: frameDuration / 2.0, preferredTimescale: timescale)
+//    generator.requestedTimeToleranceBefore = toleranceTime
+//    generator.requestedTimeToleranceAfter = toleranceTime
+    generator.requestedTimeToleranceBefore = .zero
+    generator.requestedTimeToleranceAfter = .zero
     var times: [CMTime] = []
+    let nth_frame = 10 // Save every nth frame
     for frameIndex in 0..<totalFrames {
-        let seconds = Double(frameIndex) * frameDuration
-        let time = CMTime(seconds: seconds, preferredTimescale: timescale)
-        times.append(time)
+        if frameIndex % nth_frame == 0 {
+            let seconds = Double(frameIndex) * frameDuration
+            let time = CMTime(seconds: seconds, preferredTimescale: timescale)
+            times.append(time)
+        }
     }
     
     // Prepare the save directory
