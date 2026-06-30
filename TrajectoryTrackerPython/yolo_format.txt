@@ -1,0 +1,3 @@
+YOLO Annotation Format
+<class_id> <center_x> <center_y> <width> <height>
+where all coordinate values are normalized between 0 and 1, relative to the image dimensions

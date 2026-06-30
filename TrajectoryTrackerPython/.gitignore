@@ -1,0 +1,11 @@
+# Ignore macOS system files
+.DS_Store
+**/.DS_Store
+
+# Ignore specific folders and all their contents/subfolders
+videos/
+raw_frames/
+data/
+train_data/
+.venv/
+.__pycache__
