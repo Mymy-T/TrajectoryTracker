@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from paths import ProjectPaths
 
-
+# TODO: Manually check classes.txt for each clip, find the corresponding class number for ball and negative
 
 def create_training_dataset(data_path, training_data_path):
     H = 1080
