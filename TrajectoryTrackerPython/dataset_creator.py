@@ -2,58 +2,93 @@ import cv2
 import math
 import numpy as np
 import os
+import pandas as pd
 from pathlib import Path
 from paths import ProjectPaths
+import sys
 
-# TODO: Manually check classes.txt for each clip, find the corresponding class number for ball and negative
+data_df = pd.DataFrame({
+        "path": [],
+        "prev_path": [],
+        "prev_prev_path": [],
+        "heatmap_path": []
+    })
 
-def create_training_dataset(data_path, training_data_path):
+def create_processed_dataset(data_path, processed_data_path):
     H = 1080
     W = 1920
-    clips = [clip for clip in os.listdir(data_path) if not clip.startswith('.')] # All clips have a name of the form clip_####; ignore hidden files such as .DS_Store
-    for clip in clips:
-        clip_folder = os.path.join(data_path, clip)
-        img_folder = os.path.join(clip_folder, "images")
-        label_folder = os.path.join(clip_folder, "labels")
-        img_names = sorted(os.listdir(img_folder)) # All files have a name of the form frame_########.jpg/png; rearrange alphabetically to match labels
-        label_names = sorted(os.listdir(label_folder)) # All files have a name of the form frame_########.txt; rearrange alphabetically to match imgs
-        try: # Create output directory; this should not exist yet!
-            out_clip_folder = os.path.join(training_data_path, clip)
-            os.mkdir(out_clip_folder)
-            out_img_folder = os.path.join(out_clip_folder, "images")
-            out_heatmap_folder = os.path.join(out_clip_folder, "heatmaps")
-            os.mkdir(out_img_folder)
-            os.mkdir(out_heatmap_folder)
-        except FileExistsError:
-            print(f"Make sure {training_data_path} is empty before running this function.")
+    matches = [match for match in os.listdir(data_path) if not match.startswith(".")] # All matches have a name of the form match_####; ignore hidden files such as .DS_Store
+    for match in matches:
+        match_path = os.path.join(data_path, match)
+        # Create output directory; this should not exist yet!
+        try:
+            out_match_folder = os.path.join(processed_data_path, match)
+            os.mkdir(out_match_folder)
+        except:
+            print(f"Make sure {processed_data_path} is empty before running this function.")
             raise
+        clips = [clip for clip in os.listdir(match_path) if not clip.startswith(".")] # All clips have a name of the form clip_####; ignore hidden files such as .DS_Store
+        for clip in clips:
+            clip_folder = os.path.join(match_path, clip)
+            img_folder = os.path.join(clip_folder, "images")
+            label_folder = os.path.join(clip_folder, "labels")
+            img_names = sorted(os.listdir(img_folder)) # All files have a name of the form frame_########.jpg/png; rearrange alphabetically to match labels
+            label_names = sorted(os.listdir(label_folder)) # All files have a name of the form frame_########.txt; rearrange alphabetically to match imgs
+            classes_dict = {} # Obtain from the classes.txt file withing each clip folder; matches the label class_id to the appropriate classes (ball or negative in this project)
+            with open(os.path.join(clip_folder, "classes.txt"), "r") as file:
+                for line in file:
+                    # Split line by spaces and unpack into key and values
+                    parts = line.strip().split(" ")
+                    key = int(parts[1]) # class_id
+                    value = parts[0] # class name
+                    classes_dict[key] = value
 
-        for i in range(len(img_names)): # img_names and label_names have the same length
-            img = cv2.imread(os.path.join(img_folder, img_names[i]))
-            with open(os.path.join(label_folder, label_names[i])) as label_file:
-                properties = label_file.read().split() # Properties will have the form [class_id, center_x, center_y, width, height], where coords and lengths are normalized
-                center_x = float(properties[1]) * W
-                center_y = float(properties[2]) * H
-                w = float(properties[3])*W
-                h = float(properties[4])*H
-                s = (w + h) / 2.0 # Width & height should be the same
-            training_img, gt_heatmap = create_training_data(img, center_x, center_y, s)
-            cv2.imwrite(os.path.join(out_img_folder, img_names[i]), training_img)
-            base_filename = Path(img_names[i]).stem
-            cv2.imwrite(os.path.join(out_heatmap_folder, f"{base_filename}_heatmap.png"), gt_heatmap)
+            try: # Create output directory; this should not exist yet!
+                out_clip_folder = os.path.join(out_match_folder, clip)
+                os.mkdir(out_clip_folder)
+                out_img_folder = os.path.join(out_clip_folder, "images")
+                out_heatmap_folder = os.path.join(out_clip_folder, "heatmaps")
+                os.mkdir(out_img_folder)
+                os.mkdir(out_heatmap_folder)
+            except FileExistsError:
+                print(f"Make sure {processed_data_path} is empty before running this function.")
+                raise
+
+            for i in range(len(img_names)): # img_names and label_names have the same length
+                img = cv2.imread(os.path.join(img_folder, img_names[i]))
+                with open(os.path.join(label_folder, label_names[i])) as label_file:
+                    properties = label_file.read().split() # Properties will have the form [class_id, center_x, center_y, width, height], where coords and lengths are normalized
+                    class_id = int(properties[0])
+                    center_x = float(properties[1]) * W
+                    center_y = float(properties[2]) * H
+                    w = float(properties[3])*W
+                    h = float(properties[4])*H
+                    s = (w + h) / 2.0 # Width & height should be the same
+                if classes_dict[class_id] == "negative":
+                    negative = True
+                else:
+                    negative = False
+                training_img, gt_heatmap = create_training_data(img, center_x, center_y, s, negative)
+                cv2.imwrite(os.path.join(out_img_folder, img_names[i]), training_img)
+                base_filename = Path(img_names[i]).stem
+                cv2.imwrite(os.path.join(out_heatmap_folder, f"{base_filename}_heatmap.png"), gt_heatmap)
+
     print("Training dataset created successfully!")
 
 
 
-def create_training_data(img_1080p, old_x, old_y, old_s): # All annotations are square bounding boxes, so h = w
+def create_training_data(img_1080p, old_x, old_y, old_s, negative): # All annotations are square bounding boxes, so h = w
     """
     Inputs - original image, coords of center of ball
     Outputs - resized image, gt heatmap
     """
     img_360p = cv2.resize(img_1080p, (640, 360))
-    scale_factor = float(360/1080)
+
+    if negative == True:
+        return img_360p, np.zeros((360, 640), dtype=np.uint8)
     
     # Scale label coords to match 640 by 360 img dims
+    scale_factor = float(360/1080)
     x = int(round(old_x * scale_factor))
     y = int(round(old_y * scale_factor))
     s = int(round(old_s * scale_factor))
@@ -64,6 +99,7 @@ def create_training_data(img_1080p, old_x, old_y, old_s): # All annotations are 
     heatmap_x = np.arange(0, 640, 1, float)
     heatmap_y= np.arange(0, 360, 1, float)
     heatmap_x, heatmap_y = np.meshgrid(heatmap_x, heatmap_y, indexing="xy")
+
     
     # Calculate sigma, see paper for details; the threshold is set to 73 (plug in r=5 and sigma^2 = 10 into original formula), so find sigma given that exp(-r^2 / 2*sigma^2) = 73/255 and that r = s/2
     # Rearranging and substituting r = s/2 gives sigma^2 = -s^2 / 8ln(73/255)
@@ -78,4 +114,4 @@ def create_training_data(img_1080p, old_x, old_y, old_s): # All annotations are 
 
 if __name__ == "__main__":
     project_paths = ProjectPaths()
-    create_training_dataset(project_paths.data_folder, project_paths.train_data_folder)
+    create_processed_dataset(project_paths.data_folder, project_paths.processed_data_folder)
