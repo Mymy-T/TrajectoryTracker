@@ -58,11 +58,15 @@ def create_processed_dataset(data_path, processed_data_path):
                 img = cv2.imread(os.path.join(img_folder, img_names[i]))
                 with open(os.path.join(label_folder, label_names[i])) as label_file:
                     properties = label_file.read().split() # Properties will have the form [class_id, center_x, center_y, width, height], where coords and lengths are normalized
-                    class_id = int(properties[0])
-                    center_x = float(properties[1]) * W
-                    center_y = float(properties[2]) * H
-                    w = float(properties[3])*W
-                    h = float(properties[4])*H
+                    try:
+                        class_id = int(properties[0])
+                        center_x = float(properties[1]) * W
+                        center_y = float(properties[2]) * H
+                        w = float(properties[3])*W
+                        h = float(properties[4])*H
+                    except IndexError:
+                        print(f"Index error: frame{i:04d}; see {os.path.join(label_folder, label_names[i])}")
+                        raise
                     s = (w + h) / 2.0 # Width & height should be the same
                 if classes_dict[class_id] == "negative":
                     negative = True
