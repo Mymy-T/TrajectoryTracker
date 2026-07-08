@@ -20,13 +20,12 @@ def create_processed_dataset(data_path, processed_data_path):
     matches = [match for match in os.listdir(data_path) if not match.startswith(".")] # All matches have a name of the form match_####; ignore hidden files such as .DS_Store
     for match in matches:
         match_path = os.path.join(data_path, match)
-        # Create output directory; this should not exist yet!
-        try:
-            out_match_folder = os.path.join(processed_data_path, match)
+        # Create output directory if it doesn't already exist
+        out_match_folder = os.path.join(processed_data_path, match)
+        if not os.path.exists(out_match_folder):
             os.mkdir(out_match_folder)
-        except:
-            print(f"Make sure {processed_data_path} is empty before running this function.")
-            raise
+            print(f"{out_match_folder} created.")
+
         clips = [clip for clip in os.listdir(match_path) if not clip.startswith(".")] # All clips have a name of the form clip_####; ignore hidden files such as .DS_Store
         for clip in clips:
             clip_folder = os.path.join(match_path, clip)
@@ -43,18 +42,25 @@ def create_processed_dataset(data_path, processed_data_path):
                     value = parts[0] # class name
                     classes_dict[key] = value
 
-            try: # Create output directory; this should not exist yet!
-                out_clip_folder = os.path.join(out_match_folder, clip)
+            # Test for folder existence
+            out_clip_folder = os.path.join(out_match_folder, clip)
+            if not os.path.exists(out_clip_folder):
                 os.mkdir(out_clip_folder)
-                out_img_folder = os.path.join(out_clip_folder, "images")
-                out_heatmap_folder = os.path.join(out_clip_folder, "heatmaps")
+                print(f"{out_clip_folder} created.")
+            out_img_folder = os.path.join(out_clip_folder, "images")
+            out_heatmap_folder = os.path.join(out_clip_folder, "heatmaps")
+            if not os.path.exists(out_img_folder):
                 os.mkdir(out_img_folder)
+                print(f"{out_img_folder} created.")
+            if not os.path.exists(out_heatmap_folder):
                 os.mkdir(out_heatmap_folder)
-            except FileExistsError:
-                print(f"Make sure {processed_data_path} is empty before running this function.")
-                raise
-
+                print(f"{out_heatmap_folder} created.")
+            num_already_existing_frames = 0
             for i in range(len(img_names)): # img_names and label_names have the same length
+                # Check if the file already exists, and skip it if it does
+                if os.path.exists(os.path.join(out_img_folder, img_names[i])):
+                    num_already_existing_frames += 1
+                    continue
                 img = cv2.imread(os.path.join(img_folder, img_names[i]))
                 with open(os.path.join(label_folder, label_names[i])) as label_file:
                     properties = label_file.read().split() # Properties will have the form [class_id, center_x, center_y, width, height], where coords and lengths are normalized
@@ -64,18 +70,18 @@ def create_processed_dataset(data_path, processed_data_path):
                         center_y = float(properties[2]) * H
                         w = float(properties[3])*W
                         h = float(properties[4])*H
+                        s = (w + h) / 2.0 # Width & height should be the same
+                        if classes_dict[class_id] == "negative":
+                            negative = True
+                        else:
+                            negative = False
+                        training_img, gt_heatmap = create_training_data(img, center_x, center_y, s, negative)
+                        cv2.imwrite(os.path.join(out_img_folder, img_names[i]), training_img)
+                        base_filename = Path(img_names[i]).stem
+                        cv2.imwrite(os.path.join(out_heatmap_folder, f"{base_filename}_heatmap.png"), gt_heatmap)
                     except IndexError:
-                        print(f"Index error: frame{i:04d}; see {os.path.join(label_folder, label_names[i])}")
-                        raise
-                    s = (w + h) / 2.0 # Width & height should be the same
-                if classes_dict[class_id] == "negative":
-                    negative = True
-                else:
-                    negative = False
-                training_img, gt_heatmap = create_training_data(img, center_x, center_y, s, negative)
-                cv2.imwrite(os.path.join(out_img_folder, img_names[i]), training_img)
-                base_filename = Path(img_names[i]).stem
-                cv2.imwrite(os.path.join(out_heatmap_folder, f"{base_filename}_heatmap.png"), gt_heatmap)
+                        print(f"Index error: frame{i:04d}; see {os.path.join(label_folder, label_names[i])}. Frame skipped.")
+            print(f"In {out_clip_folder}, {num_already_existing_frames} examples already existed;  {len(img_names) - num_already_existing_frames} examples were added, for a total of {len(img_names)} examples.")
 
     print("Training dataset created successfully!")
 

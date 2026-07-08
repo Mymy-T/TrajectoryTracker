@@ -39,16 +39,6 @@ def process_all_videos(video_folder_path, output_folder_path):
             extract_clip_frames(video_full_path, clip_folder)
     
 
-
-    # for i in range(len(videos)):
-    #     try:
-    #         clip_folder = os.path.join(output_folder_path, f"clip_{i:04d}")
-    #         os.mkdir(clip_folder)
-    #     except:
-    #         print(f"Make sure {output_folder_path} is empty beforehand.")
-    #         raise
-    #     extract_all_frames(os.path.join(video_folder_path, videos[i]), clip_folder)
-
 def get_match_title(filename):
     """
     Extracts the base video title by stripping off the trailing timestamp structure.
