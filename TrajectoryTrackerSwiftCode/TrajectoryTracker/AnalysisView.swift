@@ -5,7 +5,9 @@
 //  Created by Milo on 6/14/26.
 //
 
+import CoreML
 import SwiftUI
+import Vision
 
 struct AnalysisView: View {
     
