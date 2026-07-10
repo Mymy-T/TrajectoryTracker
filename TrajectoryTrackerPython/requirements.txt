@@ -9,7 +9,7 @@ flatbuffers==25.12.19
 fonttools==4.63.0
 fsspec==2026.6.0
 humanfriendly==10.0
-imgviz==2.1.0
+imgviz==1.7.5
 Jinja2==3.1.6
 kiwisolver==1.5.0
 MarkupSafe==3.0.3
@@ -27,6 +27,9 @@ pandas==3.0.3
 pillow==12.3.0
 protobuf==7.35.1
 pyparsing==3.3.2
+PyQt5==5.15.11
+PyQt5-Qt5==5.15.19
+PyQt5_sip==12.18.0
 python-dateutil==2.9.0.post0
 PyYAML==6.0.1
 qimage2ndarray==1.10.0
