@@ -50,13 +50,14 @@ def _create_data_df(processed_data_path, frame_sequence_len):
         for clip in clips:
             clip_folder = os.path.join(match_path, clip)
             img_folder = os.path.join(clip_folder, "images")
-            heatmap_folder = os.path.join(clip_folder, "heatmaps")
+            # heatmap_folder = os.path.join(clip_folder, "heatmaps")
             T = len(os.listdir(img_folder))
             unstacked_frame_nums = [[j for j in range(i, T - frame_sequence_len + 1 + i)] for i in range(frame_sequence_len)] # See d2l.ai, section 9.1.3; creates sequences of frame_sequence_len
             unstacked_frame_nums += [[j for j in range(frame_sequence_len - 1, T)]] # Duplicate last element so that it becomes the column for the ground truth heatmap path when stacked
             frame_nums = np.stack(unstacked_frame_nums, axis=1)
-            convert_num_to_img_path = np.vectorize(lambda x: os.path.join(img_folder, f"frame_{x:08d}.jpg")) # Name format is by convention in this project
-            convert_num_to_heatmap_path = np.vectorize(lambda x: os.path.join(heatmap_folder, f"frame_{x:08d}_heatmap.png")) # Name format is by convention in this project
+            # NOTE: The paths saved in the csv files are relative paths; when loading them in dataset.py, join them with processed_data_path
+            convert_num_to_img_path = np.vectorize(lambda x: os.path.join(match, clip, "images", f"frame_{x:08d}.jpg")) # Name format is by convention in this project
+            convert_num_to_heatmap_path = np.vectorize(lambda x: os.path.join(match, clip, "heatmaps", f"frame_{x:08d}_heatmap.png")) # Name format is by convention in this project
             img_paths = convert_num_to_img_path(frame_nums[:, :-1])
             heatmap_paths = convert_num_to_heatmap_path(frame_nums[:, -1:]) # Colon after -1 to prevent dimension collapse (don't drop column dimension, that's needed for concatenation)
             dataset_part = np.concatenate((img_paths, heatmap_paths), axis=1) # dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), and then heatmap(t); columns will be reversed outside the loop
@@ -96,9 +97,7 @@ def _split_data_clip_borders(df, train_prop, valid_prop, out_path):
                 break
             if i == len(clip_ids) - 1: # If we never break out of the loop
                 end_id = len(clip_ids)
-            print(f"{ideal_num}, {old_sum}, {curr_sum}")
         
-        print(end_id)
         return end_id # end_id is not included in slice
 
     N = df.shape[0]
