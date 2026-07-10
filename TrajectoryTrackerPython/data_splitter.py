@@ -38,12 +38,10 @@ def split_data(processed_data_path, out_path, mode, train_prop, valid_prop, fram
 
 def _create_data_df(processed_data_path, frame_sequence_len):
     # Initialize the dataframe containing all the paths
-    cols = ["match_id", "clip_id", "heatmap(t)", "img(t)"]
+    cols = ["match_clip_id", "heatmap(t)", "img(t)"]
     if frame_sequence_len > 1:
         additional_cols = [f"img(t-{i})" for i in range(1, frame_sequence_len)]
         cols = cols + additional_cols
-    # df_idx = pd.Index([], name="id")
-    # df = pd.DataFrame(columns=cols, index=idx)
     dataset_parts = []
     matches = sorted([match for match in os.listdir(processed_data_path) if not match.startswith(".")]) # All matches have a name of the form match_####; ignore hidden files such as .DS_Store
     for match in matches:
@@ -62,13 +60,11 @@ def _create_data_df(processed_data_path, frame_sequence_len):
             img_paths = convert_num_to_img_path(frame_nums[:, :-1])
             heatmap_paths = convert_num_to_heatmap_path(frame_nums[:, -1:]) # Colon after -1 to prevent dimension collapse (don't drop column dimension, that's needed for concatenation)
             dataset_part = np.concatenate((img_paths, heatmap_paths), axis=1) # dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), and then heatmap(t); columns will be reversed outside the loop
-            dataset_part = np.insert(dataset_part, dataset_part.shape[1], clip, axis=1) # Add clip id
-            dataset_part = np.insert(dataset_part, dataset_part.shape[1], match, axis=1) # Add match id
-            dataset_parts.append(dataset_part) # Final dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), then heatmap(t), clip_id, and match_id; will be reversed to match cols
+            match_clip_id = f"{match}__{clip}"
+            dataset_part = np.insert(dataset_part, dataset_part.shape[1], match_clip_id, axis=1)
+            dataset_parts.append(dataset_part) # Final dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), then heatmap(t), then match_clip_id; will be reversed to match cols
 
     dataset = np.flip(np.concatenate(dataset_parts, axis=0), axis=1) # Combine all the parts, and then reverse the columns of dataset to get it to match the dataframe
-    # temp_df = pd.DataFrame(dataset, columns=cols)
-    # df = pd.concat([df, temp_df], ignore_index=True)
     df = pd.DataFrame(dataset, columns=cols)
     return df
 
@@ -86,7 +82,56 @@ def _split_data_no_borders(df, train_prop, valid_prop, out_path):
     test_df.to_csv(os.path.join(out_path, "test_data.csv"), index=False)
 
 def _split_data_clip_borders(df, train_prop, valid_prop, out_path):
-    pass # TODO
+
+    def _generate_clip_split(ideal_num, prev_clip_end_id, clip_ids, clip_dict):
+        end_id = prev_clip_end_id
+        curr_sum = 0
+        for i in range(prev_clip_end_id, len(clip_ids)): # Won't run if prev_clip_end_id >= len(clip_ids)
+            old_sum = curr_sum
+            curr_sum += clip_dict[clip_ids[i]]
+            old_dist = abs(old_sum - ideal_num)
+            curr_dist = abs(curr_sum - ideal_num)
+            if old_dist <= curr_dist: # less than or equal to means that if adding another clip will result in overshooting ideal_num by the same amount it was missing, it will prefer to skip and leave an undersized dataset
+                end_id = i
+                break
+            if i == len(clip_ids) - 1: # If we never break out of the loop
+                end_id = len(clip_ids)
+            print(f"{ideal_num}, {old_sum}, {curr_sum}")
+        
+        print(end_id)
+        return end_id # end_id is not included in slice
+
+    N = df.shape[0]
+    train_num = math.floor(train_prop * N)
+    valid_num = math.floor(valid_prop * N)
+    clip_dict = df["match_clip_id"].value_counts().to_dict()
+    clip_ids = sorted(list(clip_dict.keys())) # Each key is of the form match_####__clip_####; sorts by match # first, then clip #
+
+    train_end_i = _generate_clip_split(ideal_num=train_num, prev_clip_end_id=0, clip_ids=clip_ids, clip_dict=clip_dict)
+    valid_end_i = _generate_clip_split(ideal_num=valid_num, prev_clip_end_id=train_end_i, clip_ids=clip_ids, clip_dict=clip_dict)
+
+    if train_end_i == 0:
+        print("Not enough clips; train data is empty")
+    
+    if train_end_i == valid_end_i:
+        print("Not enough clips; valid data is empty")
+    
+    if valid_end_i == len(clip_ids):
+        print("Not enough clips; test data is empty")
+
+    train_clip_ids = clip_ids[:train_end_i]
+    valid_clip_ids = clip_ids[train_end_i:valid_end_i]
+    test_clip_ids = clip_ids[valid_end_i:]
+
+    train_df = df[df["match_clip_id"].isin(train_clip_ids)]
+    valid_df = df[df["match_clip_id"].isin(valid_clip_ids)]
+    test_df = df[df["match_clip_id"].isin(test_clip_ids)]
+
+    train_df.to_csv(os.path.join(out_path, "train_data.csv"), index=False)
+    valid_df.to_csv(os.path.join(out_path, "valid_data.csv"), index=False)
+    test_df.to_csv(os.path.join(out_path, "test_data.csv"), index=False)
+
+
 
 def _split_data_match_borders(df, train_prop, valid_prop, out_path):
     pass # TODO
