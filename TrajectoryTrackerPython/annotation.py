@@ -51,7 +51,7 @@ def export_annotated_frames_in_yolo_format(input_dir, output_dir):
     class_mapping = {"negative": 0, "ball": 1}
     
     # Gather all JSON annotation files from the input directory
-    json_files = [f for f in os.listdir(input_dir) if f.endswith('.json')]
+    json_files = [f for f in os.listdir(input_dir) if f.endswith(".json")]
     
     print(f"Starting YOLO conversion for {len(json_files)} frames...")
     

@@ -69,6 +69,22 @@ def _create_data_df(processed_data_path, frame_sequence_len):
     df = pd.DataFrame(dataset, columns=cols)
     return df
 
+def _generate_folder_level_split(ideal_num, prev_folder_end_index, folder_indices, folder_dict):
+    end_id = prev_folder_end_index
+    curr_sum = 0
+    for i in range(prev_folder_end_index, len(folder_indices)): # Won't run if prev_clip_end_id >= len(clip_ids)
+        old_sum = curr_sum
+        curr_sum += folder_dict[folder_indices[i]]
+        old_dist = abs(old_sum - ideal_num)
+        curr_dist = abs(curr_sum - ideal_num)
+        if old_dist <= curr_dist: # less than or equal to means that if adding another clip will result in overshooting ideal_num by the same amount it was missing, it will prefer to skip and leave an undersized dataset
+            end_id = i
+            break
+        if i == len(folder_indices) - 1: # If we never break out of the loop
+            end_id = len(folder_indices)
+    
+    return end_id # end_id is not included in slice
+
 
 def _split_data_no_borders(df, train_prop, valid_prop, out_path):
     # Splitting into train/valid/test
@@ -83,38 +99,21 @@ def _split_data_no_borders(df, train_prop, valid_prop, out_path):
     test_df.to_csv(os.path.join(out_path, "test_data.csv"), index=False)
 
 def _split_data_clip_borders(df, train_prop, valid_prop, out_path):
-
-    def _generate_clip_split(ideal_num, prev_clip_end_id, clip_ids, clip_dict):
-        end_id = prev_clip_end_id
-        curr_sum = 0
-        for i in range(prev_clip_end_id, len(clip_ids)): # Won't run if prev_clip_end_id >= len(clip_ids)
-            old_sum = curr_sum
-            curr_sum += clip_dict[clip_ids[i]]
-            old_dist = abs(old_sum - ideal_num)
-            curr_dist = abs(curr_sum - ideal_num)
-            if old_dist <= curr_dist: # less than or equal to means that if adding another clip will result in overshooting ideal_num by the same amount it was missing, it will prefer to skip and leave an undersized dataset
-                end_id = i
-                break
-            if i == len(clip_ids) - 1: # If we never break out of the loop
-                end_id = len(clip_ids)
-        
-        return end_id # end_id is not included in slice
-
     N = df.shape[0]
     train_num = math.floor(train_prop * N)
     valid_num = math.floor(valid_prop * N)
     clip_dict = df["match_clip_id"].value_counts().to_dict()
     clip_ids = sorted(list(clip_dict.keys())) # Each key is of the form match_####__clip_####; sorts by match # first, then clip #
 
-    train_end_i = _generate_clip_split(ideal_num=train_num, prev_clip_end_id=0, clip_ids=clip_ids, clip_dict=clip_dict)
-    valid_end_i = _generate_clip_split(ideal_num=valid_num, prev_clip_end_id=train_end_i, clip_ids=clip_ids, clip_dict=clip_dict)
+    train_end_i = _generate_folder_level_split(ideal_num=train_num, prev_folder_end_index=0, folder_indices=clip_ids, folder_dict=clip_dict)
+    valid_end_i = _generate_folder_level_split(ideal_num=valid_num, prev_folder_end_index=train_end_i, folder_indices=clip_ids, folder_dict=clip_dict)
 
     if train_end_i == 0:
         print("Not enough clips; train data is empty")
-    
+
     if train_end_i == valid_end_i:
         print("Not enough clips; valid data is empty")
-    
+
     if valid_end_i == len(clip_ids):
         print("Not enough clips; test data is empty")
 
@@ -133,9 +132,40 @@ def _split_data_clip_borders(df, train_prop, valid_prop, out_path):
 
 
 def _split_data_match_borders(df, train_prop, valid_prop, out_path):
-    pass # TODO
+    N = df.shape[0]
+    train_num = math.floor(train_prop * N)
+    valid_num = math.floor(valid_prop * N)
+    df_copy = df.copy()
+    df_copy["match_id"] = df["match_clip_id"].str.split('__', n=1).str[0]
+    match_dict = df_copy["match_id"].value_counts().to_dict()
+    match_ids = sorted(list(match_dict.keys())) # Each key is of the form match_####__clip_####; sorts by match # first, then clip #
+
+    train_end_i = _generate_folder_level_split(ideal_num=train_num, prev_folder_end_index=0, folder_indices=match_ids, folder_dict=match_dict)
+    valid_end_i = _generate_folder_level_split(ideal_num=valid_num, prev_folder_end_index=train_end_i, folder_indices=match_ids, folder_dict=match_dict)
+
+    if train_end_i == 0:
+        print("Not enough clips; train data is empty")
+
+    if train_end_i == valid_end_i:
+        print("Not enough clips; valid data is empty")
+
+    if valid_end_i == len(match_ids):
+        print("Not enough clips; test data is empty")
+
+    train_match_ids = match_ids[:train_end_i]
+    valid_match_ids = match_ids[train_end_i:valid_end_i]
+    test_match_ids = match_ids[valid_end_i:]
+
+    train_df = df[df_copy["match_id"].isin(train_match_ids)]
+    valid_df = df[df_copy["match_id"].isin(valid_match_ids)]
+    test_df = df[df_copy["match_id"].isin(test_match_ids)]
+
+    train_df.to_csv(os.path.join(out_path, "train_data.csv"), index=False)
+    valid_df.to_csv(os.path.join(out_path, "valid_data.csv"), index=False)
+    test_df.to_csv(os.path.join(out_path, "test_data.csv"), index=False)
+
 
 if __name__ == "__main__":
     paths = ProjectPaths()
-    mode = DataSplitMode.no_border
+    mode = DataSplitMode.match_border
     split_data(processed_data_path=paths.processed_data_folder, out_path=paths.dataset_folder, mode=mode, train_prop=0.7, valid_prop=0.15)
