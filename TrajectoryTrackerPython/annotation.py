@@ -156,7 +156,7 @@ if __name__ == '__main__':
     numeric_match_folder = load_or_create_mapping(mapping_file, match_title)
 
     # Generate the corresponding target output directory path
-    output_annotation_path = os.path.join(os.getcwd(), paths.data_folder, numeric_match_folder, clip_folder_name)
+    output_annotation_path = os.path.join(os.getcwd(), paths.annotated_data_folder, numeric_match_folder, clip_folder_name)
     
     # Check if directory already exists
     if os.path.exists(output_annotation_path):

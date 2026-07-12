@@ -50,7 +50,6 @@ def _create_data_df(processed_data_path, frame_sequence_len):
         for clip in clips:
             clip_folder = os.path.join(match_path, clip)
             img_folder = os.path.join(clip_folder, "images")
-            # heatmap_folder = os.path.join(clip_folder, "heatmaps")
             T = len(os.listdir(img_folder))
             unstacked_frame_nums = [[j for j in range(i, T - frame_sequence_len + 1 + i)] for i in range(frame_sequence_len)] # See d2l.ai, section 9.1.3; creates sequences of frame_sequence_len
             unstacked_frame_nums += [[j for j in range(frame_sequence_len - 1, T)]] # Duplicate last element so that it becomes the column for the ground truth heatmap path when stacked

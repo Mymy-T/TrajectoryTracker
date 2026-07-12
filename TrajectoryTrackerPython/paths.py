@@ -12,7 +12,7 @@ class ProjectPaths:
 
         # TODO: make paths if not already exist
         self.raw_frame_folder = os.path.join(os.getcwd(), "raw_frames") # For frames exported from clips
-        self.data_folder = os.path.join(os.getcwd(), "annotated_data") # For annotated data; contains both raw images and labels
+        self.annotated_data_folder = os.path.join(os.getcwd(), "annotated_data") # For annotated data; contains both raw images and labels
         self.videos_folder = os.path.join(os.getcwd(), "videos") # For unedited and long videos (may be downloaded from internet)
         self.processed_data_folder = os.path.join(os.getcwd(), "processed_data") # For processed data ready to be split
         self.dataset_folder = os.path.join(os.getcwd(), "datasets") # For .csv files listing the processed data paths to be read when loading for training; contains train, valid, and test csv files

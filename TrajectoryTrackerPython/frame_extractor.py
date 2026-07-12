@@ -52,7 +52,7 @@ def get_match_title(filename):
         match_part = parts[0] # ignore the latter half; now of the form "title_XX-XX-XX"
         # Remove the starting timestamp attached to the match title (the last item after splitting by '_')
         if "_" in match_part:
-            match_part = match_part.rsplit("_", 1)[0] # After split, you get ["title", "XX-XX-XX"] as it's split at the rightmost "_" 
+            match_part = match_part.rsplit("_", 1)[0] # After split, you get ["title", "XX-XX-XX"] as it's split once at the rightmost "_" 
         return match_part
         
     print(f"Error with video name: {filename} is not of the form 'title_XX-XX-XX_to_XX-XX-XX'")

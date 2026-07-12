@@ -117,11 +117,11 @@ def create_training_data(img_1080p, old_x, old_y, old_s, negative): # All annota
 
     dist_sq = (heatmap_x - x)**2 + (heatmap_y - y)**2  # Utilize broadcasting
     gaussian = np.exp(-dist_sq / (2 * sigma_sq))
-    heatmap_360p = (gaussian * 255).astype(np.uint8) # Final shape is (360 x 640), correct for cv2
+    heatmap_360p = (gaussian * 255).astype(np.uint8) # Final shape is (360 x 640), correct for cv2; values are confined between 0 and 255, inclusive
     
     return img_360p, heatmap_360p
 
 
 if __name__ == "__main__":
     project_paths = ProjectPaths()
-    create_processed_dataset(project_paths.data_folder, project_paths.processed_data_folder)
+    create_processed_dataset(project_paths.annotated_data_folder, project_paths.processed_data_folder)
