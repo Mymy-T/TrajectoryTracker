@@ -15,6 +15,10 @@ class ProjectPaths:
         self.videos_folder = os.path.join(os.getcwd(), "videos") # For unedited and long videos (may be downloaded from internet)
         self.processed_data_folder = os.path.join(os.getcwd(), "processed_data") # For processed data ready to be split
         self.dataset_folder = os.path.join(os.getcwd(), "datasets") # For .csv files listing the processed data paths to be read when loading for training; contains train, valid, and test csv files
+        self.final_model_training_logs = os.path.join(os.getcwd(), "logs", "final_models")
+        self.hyperparam_tuning_training_logs = os.path.join(os.getcwd(), "logs", "hyperparam_tuning")
+        self.final_model_save_folder = os.path.join(os.getcwd(), "model_saves", "final_models")
+        self.hyperparam_tuning_model_save_folder = os.path.join(os.getcwd(), "model_saves", "hparam_tune_models")
 
         if not os.path.exists(self.raw_frame_folder):
             os.mkdir(self.raw_frame_folder)
@@ -26,4 +30,9 @@ class ProjectPaths:
             os.mkdir(self.processed_data_folder)
         if not os.path.exists(self.dataset_folder):
             os.mkdir(self.dataset_folder)
+        
+        os.makedirs(self.final_model_training_logs, exist_ok=True)
+        os.makedirs(self.hyperparam_tuning_training_logs, exist_ok=True)
+        os.makedirs(self.final_model_save_folder, exist_ok=True)
+        os.makedirs(self.hyperparam_tuning_model_save_folder, exist_ok=True)
 
