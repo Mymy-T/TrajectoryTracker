@@ -1,6 +1,5 @@
 import cv2
 from enum import Enum
-import math
 import numpy as np
 import os
 import pandas as pd
@@ -11,6 +10,8 @@ class DatasetType(Enum):
     train = 0
     valid = 1
     test = 2
+
+# Based off of yastrebksv's implementation of TrackNet on github: https://github.com/yastrebksv/TrackNet/blob/main/datasets.py
 
 class TrackNetDataset(Dataset):
     def __init__(self, mode: DatasetType, input_height=360, input_width=640):
@@ -36,7 +37,7 @@ class TrackNetDataset(Dataset):
         img_paths = list(reversed(selected_paths[1:])) # [img(t-(frame_sequence_len-1)), ... , img(t-2), img(t-1), img(t)] -> order correct, where lower channel numbers are earlier timesteps
         inputs = self._get_input(img_paths)
         outputs = self.get_output(heatmap_path)
-        return inputs, outputs
+        return (inputs, outputs)
     
     def _get_output(self, heatmap_path):
         img = cv2.imread(heatmap_path, cv2.IMREAD_GRAYSCALE)

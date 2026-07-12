@@ -1,5 +1,5 @@
-import torch.nn as nn
 import torch
+import torch.nn as nn
 
 # Credit to yastrebksv's implementation of TrackNet on github: https://github.com/yastrebksv/TrackNet/blob/main/model.py
 
@@ -46,7 +46,7 @@ class BallTrackerNet(nn.Module):
         self.conv17 = ConvBlock(in_channels=64, out_channels=64)
         self.conv18 = ConvBlock(in_channels=64, out_channels=self.out_channels)
 
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax(dim=1) # Channel dimension
         self._init_weights()
                   
     def forward(self, x, testing=False): 
@@ -74,11 +74,10 @@ class BallTrackerNet(nn.Module):
         x = self.ups3(x)
         x = self.conv16(x)
         x = self.conv17(x)
-        x = self.conv18(x)
-        # x = self.softmax(x)
-        out = x.reshape(batch_size, self.out_channels, -1)
+        out = self.conv18(x)
+        # out = x.reshape(batch_size, self.out_channels, -1)
         if testing:
-            out = self.softmax(out, dim=1)
+            out = self.softmax(out)
         return out                       
     
     def _init_weights(self):
@@ -93,7 +92,6 @@ class BallTrackerNet(nn.Module):
     
 
 
-    
     
 if __name__ == '__main__':
     device = 'cpu'

@@ -10,7 +10,6 @@ class ProjectPaths:
             print(f"Should be executed within: {os.path.dirname(os.path.abspath(__file__))}")
             sys.exit(1)
 
-        # TODO: make paths if not already exist
         self.raw_frame_folder = os.path.join(os.getcwd(), "raw_frames") # For frames exported from clips
         self.annotated_data_folder = os.path.join(os.getcwd(), "annotated_data") # For annotated data; contains both raw images and labels
         self.videos_folder = os.path.join(os.getcwd(), "videos") # For unedited and long videos (may be downloaded from internet)
