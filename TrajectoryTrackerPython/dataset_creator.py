@@ -7,13 +7,6 @@ from pathlib import Path
 from paths import ProjectPaths
 import sys
 
-data_df = pd.DataFrame({
-        "path": [],
-        "prev_path": [],
-        "prev_prev_path": [],
-        "heatmap_path": []
-    })
-
 def create_processed_dataset(data_path, processed_data_path):
     H = 1080
     W = 1920

@@ -33,32 +33,18 @@ actual_final_path = os.path.join(
 
 # Download only the required chunk directly from YouTube's server
 print(f"Fetching and slicing clip from {start_time} to {end_time}...")
-# ydl_opts = {
-#     "format": "bestvideo[height<=1080][fps>=60]+bestaudio/best[height<=1080]/bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-#     "merge_output_format": "mp4",
-#     "outtmpl": actual_final_path,
-#     "quiet": True,
-    
-#     # Force yt-dlp to use ffmpeg to connect to the stream
-#     "external_downloader": "ffmpeg",
-    
-#     # Pass the timestamps
-#     "external_downloader_args": {
-#         "ffmpeg_i": ["-ss", start_time, "-to", end_time]
-#     }
-# }
 
 ydl_opts = {
-    # 1. FORCE H.264 (avc1) codec for full OpenCV compatibility
+    # H.264 (avc1) codec for full OpenCV compatibility
     "format": "bestvideo[height<=1080][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4][vcodec^=avc1]/best",
     "merge_output_format": "mp4",
     "outtmpl": actual_final_path,
     "quiet": True,
     
-    # 2. Use ffmpeg to post-process the slice cleanly instead of stream-slicing input
+    #  ffmpeg to post-process the slice cleanly instead of stream-slicing input
     "force_keyframes_at_cuts": True,
     
-    # 3. Download the full stream chunks safely, then cleanly slice with ffmpeg post-processor
+    # Download the full stream chunks safely, then cleanly slice with ffmpeg post-processor
     "postprocessor_args": {
         "ffmpeg": [
             "-ss", start_time,

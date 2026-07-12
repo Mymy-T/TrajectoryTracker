@@ -18,8 +18,8 @@ class ProjectPaths:
 
         if not os.path.exists(self.raw_frame_folder):
             os.mkdir(self.raw_frame_folder)
-        if not os.path.exists(self.data_folder):
-            os.mkdir(self.data_folder)
+        if not os.path.exists(self.annotated_data_folder):
+            os.mkdir(self.annotated_data_folder)
         if not os.path.exists(self.videos_folder):
             os.mkdir(self.videos_folder)
         if not os.path.exists(self.processed_data_folder):
