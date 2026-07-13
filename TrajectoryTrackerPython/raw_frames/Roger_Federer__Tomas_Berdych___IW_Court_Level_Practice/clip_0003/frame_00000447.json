@@ -1,0 +1,27 @@
+{
+  "version": "0.4.30",
+  "flags": {},
+  "shapes": [
+    {
+      "label": "ball",
+      "text": "",
+      "points": [
+        [
+          925.352059823212,
+          425.7303771581912
+        ],
+        [
+          931.3000000000001,
+          431.59999999999997
+        ]
+      ],
+      "group_id": null,
+      "shape_type": "rectangle",
+      "flags": {}
+    }
+  ],
+  "imagePath": "frame_00000447.jpg",
+  "imageData": null,
+  "imageHeight": 1080,
+  "imageWidth": 1920
+}
