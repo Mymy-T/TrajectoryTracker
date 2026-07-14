@@ -28,7 +28,7 @@ class TrackNetDataset(Dataset):
         self.processed_data_folder = paths.processed_data_folder
         
     def __len__(self):
-        return self.data.shape[0]
+        return self.data_df.shape[0]
     
     def __getitem__(self, idx):
         #  self.data_df has columns [match_clip_id, heatmap(t), img(t), ...,  img(t-(frame_sequence_len - 1))]
@@ -36,7 +36,7 @@ class TrackNetDataset(Dataset):
         heatmap_path = selected_paths[0]
         img_paths = list(reversed(selected_paths[1:])) # [img(t-(frame_sequence_len-1)), ... , img(t-2), img(t-1), img(t)] -> order correct, where lower channel numbers are earlier timesteps
         inputs = self._get_input(img_paths)
-        outputs = self.get_output(heatmap_path)
+        outputs = self._get_output(heatmap_path)
         return (inputs, outputs)
     
     def _get_output(self, heatmap_path):
@@ -58,3 +58,9 @@ class TrackNetDataset(Dataset):
         imgs = np.moveaxis(imgs, 2, 0) # Shape now (c, h, w)
         imgs = imgs.astype(np.float32) / 255.0 # Normalize pixel values to [0, 1] to enhance training stability
         return imgs
+    
+if __name__ == "__main__":
+    data = TrackNetDataset(DatasetType.valid)
+    print(f"Input shape: {data[0][0].shape}")
+    print(f"Label shape: {data[0][1].shape}")
+    print(f"Valid data num examples: {data.__len__()}")

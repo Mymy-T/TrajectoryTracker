@@ -15,7 +15,7 @@ class ConvBlock(nn.Module):
     def forward(self, x):
         return self.block(x)
 
-class BallTrackerNet(nn.Module):
+class TrackNet(nn.Module):
     def __init__(self, out_channels=256):
         super().__init__()
         
@@ -95,7 +95,7 @@ class BallTrackerNet(nn.Module):
     
 if __name__ == '__main__':
     device = 'cpu'
-    model = BallTrackerNet().to(device)
+    model = TrackNet().to(device)
     input = torch.rand(1, 9, 360, 640)
     out = model(input)
     print(f"out shape = {out.shape}")

@@ -19,6 +19,7 @@ class ProjectPaths:
         self.hyperparam_tuning_training_logs = os.path.join(os.getcwd(), "logs", "hyperparam_tuning")
         self.final_model_save_folder = os.path.join(os.getcwd(), "model_saves", "final_models")
         self.hyperparam_tuning_model_save_folder = os.path.join(os.getcwd(), "model_saves", "hparam_tune_models")
+        self.pretrained_model_path = os.path.join(os.getcwd(), "pretrained_model.pt")
 
         if not os.path.exists(self.raw_frame_folder):
             os.mkdir(self.raw_frame_folder)

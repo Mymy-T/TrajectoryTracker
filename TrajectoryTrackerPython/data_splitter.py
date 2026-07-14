@@ -166,5 +166,5 @@ def _split_data_match_borders(df, train_prop, valid_prop, out_path):
 
 if __name__ == "__main__":
     paths = ProjectPaths()
-    mode = DataSplitMode.match_border
+    mode = DataSplitMode.no_border
     split_data(processed_data_path=paths.processed_data_folder, out_path=paths.dataset_folder, mode=mode, train_prop=0.7, valid_prop=0.15)

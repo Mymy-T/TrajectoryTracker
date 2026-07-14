@@ -13,6 +13,7 @@ class RunType(Enum):
     final_model_training = 0
     hyperparameter_tuning = 1
 
+# TODO: Write performance to csv file if run_type is hyperparameter tuning
 def train_and_evaluate_model(model, lr, batch_size, min_epochs, max_epochs, early_stopping_patience, name, run_type: RunType, verbose=True):
     paths = ProjectPaths()
     if run_type == RunType.final_model_training:
