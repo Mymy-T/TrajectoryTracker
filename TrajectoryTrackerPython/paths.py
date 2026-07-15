@@ -10,16 +10,24 @@ class ProjectPaths:
             print(f"Should be executed within: {os.path.dirname(os.path.abspath(__file__))}")
             sys.exit(1)
 
+        # Data Collection & Dataset Creation
         self.raw_frame_folder = os.path.join(os.getcwd(), "raw_frames") # For frames exported from clips
         self.annotated_data_folder = os.path.join(os.getcwd(), "annotated_data") # For annotated data; contains both raw images and labels
         self.videos_folder = os.path.join(os.getcwd(), "videos") # For unedited and long videos (may be downloaded from internet)
         self.processed_data_folder = os.path.join(os.getcwd(), "processed_data") # For processed data ready to be split
         self.dataset_folder = os.path.join(os.getcwd(), "datasets") # For .csv files listing the processed data paths to be read when loading for training; contains train, valid, and test csv files
+
+        # Training Logs
         self.final_model_training_logs = os.path.join(os.getcwd(), "logs", "final_models")
         self.hyperparam_tuning_training_logs = os.path.join(os.getcwd(), "logs", "hyperparam_tuning")
+
+        # Model Paths
         self.final_model_save_folder = os.path.join(os.getcwd(), "model_saves", "final_models")
         self.hyperparam_tuning_model_save_folder = os.path.join(os.getcwd(), "model_saves", "hparam_tune_models")
         self.pretrained_model_path = os.path.join(os.getcwd(), "pretrained_model.pt")
+
+        # Testing
+        self.videos_for_inference_folder = os.path.join(os.getcwd(), "inference_videos")
 
         if not os.path.exists(self.raw_frame_folder):
             os.mkdir(self.raw_frame_folder)
@@ -31,6 +39,8 @@ class ProjectPaths:
             os.mkdir(self.processed_data_folder)
         if not os.path.exists(self.dataset_folder):
             os.mkdir(self.dataset_folder)
+        if not os.path.exists(self.videos_for_inference_folder):
+            os.mkdir(self.videos_for_inference_folder)
         
         os.makedirs(self.final_model_training_logs, exist_ok=True)
         os.makedirs(self.hyperparam_tuning_training_logs, exist_ok=True)
