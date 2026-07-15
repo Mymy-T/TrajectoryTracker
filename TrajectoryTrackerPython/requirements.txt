@@ -43,6 +43,7 @@ tensorboard-data-server==0.7.2
 termcolor==1.1.0
 torch==2.2.2
 torchvision==0.17.2
+tqdm==4.68.4
 typing_extensions==4.16.0
 Werkzeug==3.1.8
 yt-dlp==2026.7.4

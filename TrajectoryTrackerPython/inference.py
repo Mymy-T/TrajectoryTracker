@@ -1,21 +1,48 @@
 import cv2
+from frame_extractor import extract_clip_frames
 import os
 from model import TrackNet
 import numpy as np
 from paths import ProjectPaths
 import sys
 import torch
+from tqdm import trange
 
-# USAGE: python3 inference.py inference_video_name model_name
+# TODO: Create an mp4 video of the heatmaps too (before threshold is applied)
+
+# <> -> required input; [] -> optional input
+# USAGE: python3 inference.py <model_name> <preexisting_video> [inference_video_folder] [sample_video_name]
+# NOTE: inference_video_name and sample_video_name are mutually exclusive; specify inference_video_folder if you set preexisting_video to True; specify sample_video_name if you set preexisting_video to False
+# preexisting_video is a bool, and should only take on True or False
+# inference_video_folder is the name of the folder in the project path "videos_for_inference" folder (no extension)
+# model_name is the name of the trained model, as saved in the project path "final_model_save" folder (include extension)
+# sample video (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
 
 def main():
 
-    if len(sys.argv) != 3:
-        print("USAGE: python3 inference.py inferenceVideoName modelName")
+    if len(sys.argv) != 4:
+        print("USAGE: python3 inference.py <model_name> <preexisting_video> [inference_video_name] [sample_video_name]")
+        sys.exit(1)
+
+    paths = ProjectPaths()
+    model_name = sys.argv[1]
+    inference_video_folder = os.path.join(paths.videos_for_inference_folder, sys.argv[3])
+
+    if sys.argv[2] == "False":
+        original_video_filename = f"{sys.argv[3]}.mp4"
+        if not os.path.exists(inference_video_folder):
+            os.mkdir(inference_video_folder)
+        
+        extract_clip_frames(video_path=os.path.join(paths.videos_folder, original_video_filename), output_dir=inference_video_folder)
+        print("Frames extracted")
+    elif sys.argv[2] == "True":
+        pass
+    else:
+        print("arg <preexisting_video> must be either 'True' or 'False'")
         sys.exit(1)
     
-    tracked_ball_points = obtain_tracked_ball_data(inference_video_name=sys.argv[1], model_name=sys.argv[2])
-    create_annotated_video(inference_video_name=sys.argv[1], tracked_ball_points=tracked_ball_points)
+    tracked_ball_points = obtain_tracked_ball_data(frame_folder_path=inference_video_folder, model_name=model_name)
+    create_annotated_video(inference_video_name=inference_video_folder, tracked_ball_points=tracked_ball_points)
 
 def load_model(model_name):
     paths = ProjectPaths()
@@ -68,21 +95,19 @@ def obtain_ball_center_coords(filtered_output):
     
     return list(circles[0][0])
 
-def obtain_tracked_ball_data(inference_video_name, model_name):
-    paths = ProjectPaths()
-    frame_folder_path = os.path.join(paths.videos_for_inference_folder, inference_video_name) # Folder where saved video frames will be
+def obtain_tracked_ball_data(frame_folder_path, model_name):
     model = load_model(model_name) # Load the trained model
     model.eval()
 
-    # Loop through the frames and run each frame sequence through the model; frames should be sorted in order and have names of the form frame_####.jpg
-    frames = sorted([frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")]) # All frames have a name of the form frame_####.jpg; ignore hidden files such as .DS_Store
+    # Loop through the frames and run each frame sequence through the model; frames should be sorted in order and have names of the form frame_########.jpg
+    frames = [frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
     ball_points = {}
     with torch.inference_mode():
-        for i in range(len(frames)):
+        for i in trange(len(frames), desc="Obtaining ball positions..."):
             frame_ids = create_frame_sequence(i)
             if frame_ids is None:
                 continue
-            frame_ids = list(map(lambda x: os.path.join(frame_folder_path, f"frame_{x:04d}.jpg"), frame_ids))
+            frame_ids = list(map(lambda x: os.path.join(frame_folder_path, f"frame_{x:08d}.jpg"), frame_ids))
             model_input = np.expand_dims(get_input(frame_ids), axis=0) # Add batch dimension, batch size just equals 1
             model_input_tensor = torch.from_numpy(model_input).float()
             model_output_tensor = model(model_input_tensor, testing=True) # Shape is now (N, c, h, w) where N = 1
@@ -107,9 +132,9 @@ def create_annotated_video(inference_video_name, tracked_ball_points):
     video_writer = cv2.VideoWriter(output_path, fourcc, output_fps, frame_size)
 
     frame_folder_path = os.path.join(paths.videos_for_inference_folder, inference_video_name) # Folder where saved video frames will be
-    frames = sorted([frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")]) # All frames have a name of the form frame_####.jpg; ignore hidden files such as .DS_Store
-    for i in range(len(frames)):
-        frame_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, f"frame_{i:04d}.jpg")
+    frames = [frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
+    for i in trange(len(frames), desc="Generating output video..."):
+        frame_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, f"frame_{i:08d}.jpg")
         frame = cv2.imread(frame_path)
         frame_annotations = tracked_ball_points.get(i, None)
         if frame_annotations is not None:
