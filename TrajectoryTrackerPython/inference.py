@@ -16,7 +16,8 @@ from tqdm import trange
 # preexisting_video is a bool, and should only take on True or False
 # inference_video_folder is the name of the folder in the project path "videos_for_inference" folder (no extension)
 # model_name is the name of the trained model, as saved in the project path "final_model_save" folder (include extension)
-# sample video (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
+# sample_video_name (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
+# NOTE: When passing in inference_video_folder or sample_video_name, it may be necessary to enclose it in quotation marks to avoid terminal marking it as another command
 
 def main():
 
