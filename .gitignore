@@ -5,3 +5,4 @@
 # Ignore specific folders and all their contents/subfolders
 .venv/
 __pycache__/
+.vscode/

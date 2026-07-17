@@ -22,7 +22,7 @@ from tqdm import trange
 def main():
 
     if len(sys.argv) != 4:
-        print("USAGE: python3 inference.py <model_name> <preexisting_video> [inference_video_name] [sample_video_name]")
+        print("USAGE: python3 inference.py <model_name> <preexisting_video> [inference_video_name OR sample_video_name]")
         sys.exit(1)
 
     paths = ProjectPaths()
@@ -43,6 +43,7 @@ def main():
         sys.exit(1)
     
     tracked_ball_points = obtain_tracked_ball_data(frame_folder_path=inference_video_folder, model_name=model_name)
+    create_heatmap_video(inference_video_name=inference_video_folder)
     create_annotated_video(inference_video_name=inference_video_folder, tracked_ball_points=tracked_ball_points)
 
 def load_model(model_name):
@@ -103,10 +104,16 @@ def obtain_tracked_ball_data(frame_folder_path, model_name):
     # Loop through the frames and run each frame sequence through the model; frames should be sorted in order and have names of the form frame_########.jpg
     frames = [frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
     ball_points = {}
+    # Make a directory to save the intermediate heatmaps before thresholding has been applied
+    heatmap_folder = os.path.join(frame_folder_path, "heatmaps")
+    if not os.path.exists(heatmap_folder):
+        os.mkdir(heatmap_folder)
     with torch.inference_mode():
         for i in trange(len(frames), desc="Obtaining ball positions..."):
             frame_ids = create_frame_sequence(i)
             if frame_ids is None:
+                heatmap = np.zeros((360, 640))# Write an empty intermediate heatmap
+                cv2.imwrite(os.path.join(heatmap_folder, f"frame_{i:08d}_heatmap.png"), heatmap) # Save intermediate heatmaps
                 continue
             frame_ids = list(map(lambda x: os.path.join(frame_folder_path, f"frame_{x:08d}.jpg"), frame_ids))
             model_input = np.expand_dims(get_input(frame_ids), axis=0) # Add batch dimension, batch size just equals 1
@@ -114,14 +121,35 @@ def obtain_tracked_ball_data(frame_folder_path, model_name):
             model_output_tensor = model(model_input_tensor, testing=True) # Shape is now (N, c, h, w) where N = 1
             model_output = model_output_tensor.detach().cpu().numpy()
             model_output = np.argmax(model_output, axis=1) # Shape is now (1, h, w); array of integers
-            model_output = filter_by_threshold(model_output)
             model_output = np.squeeze(model_output, axis=0) # Shape is now (h, w); 2d array required for cv2.HoughCircles
+            cv2.imwrite(os.path.join(heatmap_folder, f"frame_{i:08d}_heatmap.png"), model_output) # Save intermediate heatmaps
+            model_output = filter_by_threshold(model_output)
             ball_point = obtain_ball_center_coords(filtered_output=model_output)
             if ball_point is not None:
                 scale_factor = 1080/360 # Multiply center coords by a scale factor to get from 360 x 640 to 1080 x 1920
                 ball_point = list(map(lambda x: int(x*scale_factor), ball_point)) # ints used so it can be used when OpenCV draws circles
                 ball_points[i] = ball_point
     return ball_points
+
+def create_heatmap_video(inference_video_name):
+    # Video saved to the same folder as the frames (not heatmaps)
+    paths = ProjectPaths()
+    output_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, "heatmap_video.mp4")
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Standard MP4 codec
+    output_fps = 60.0
+    frame_size = (1920, 1080)
+    video_writer = cv2.VideoWriter(output_path, fourcc, output_fps, frame_size)
+
+    heatmap_folder_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, "heatmaps") # Folder where saved heatmaps will be
+    heatmaps = [heatmap for heatmap in os.listdir(heatmap_folder_path) if not heatmap.startswith(".")] # All heatmaps have a name of the form frame_########.png; ignore hidden files such as .DS_Store
+    for i in trange(len(heatmaps), desc="Generating output heatmap video..."):
+        heatmap_path = os.path.join(heatmap_folder_path, f"frame_{i:08d}_heatmap.png")
+        heatmap = cv2.imread(heatmap_path, cv2.IMREAD_GRAYSCALE)
+        heatmap = cv2.resize(heatmap, (1920, 1080))
+        heatmap = cv2.cvtColor(heatmap, cv2.COLOR_GRAY2BGR)
+        video_writer.write(heatmap)
+    video_writer.release()
+    print("Heatmap video saved successfully!")
 
 def create_annotated_video(inference_video_name, tracked_ball_points):
     # Video saved to the same folder as the frames
@@ -134,8 +162,8 @@ def create_annotated_video(inference_video_name, tracked_ball_points):
 
     frame_folder_path = os.path.join(paths.videos_for_inference_folder, inference_video_name) # Folder where saved video frames will be
     frames = [frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
-    for i in trange(len(frames), desc="Generating output video..."):
-        frame_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, f"frame_{i:08d}.jpg")
+    for i in trange(len(frames), desc="Generating annotated video..."):
+        frame_path = os.path.join(frame_folder_path, f"frame_{i:08d}.jpg")
         frame = cv2.imread(frame_path)
         frame_annotations = tracked_ball_points.get(i, None)
         if frame_annotations is not None:
@@ -148,7 +176,7 @@ def create_annotated_video(inference_video_name, tracked_ball_points):
             video_writer.write(frame)
 
     video_writer.release()
-    print("Video saved successfully!")
+    print("Annotated video saved successfully!")
 
 if __name__ == "__main__":
     main()
