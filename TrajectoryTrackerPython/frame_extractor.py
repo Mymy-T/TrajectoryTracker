@@ -1,7 +1,6 @@
 import cv2
 import os
 from paths import ProjectPaths
-import sys
 
 
 def process_all_videos(video_folder_path, output_folder_path):

@@ -94,7 +94,10 @@ class TrackNet(nn.Module):
 
     
 if __name__ == '__main__':
-    device = 'cpu'
+    if torch.accelerator.is_available():
+        device = torch.device(torch.accelerator.current_accelerator())
+    else:
+        device = torch.device("cpu")
     model = TrackNet().to(device)
     input = torch.rand(1, 9, 360, 640)
     out = model(input)

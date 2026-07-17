@@ -19,6 +19,11 @@ from tqdm import trange
 # sample_video_name (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
 # NOTE: When passing in inference_video_folder or sample_video_name, it may be necessary to enclose it in quotation marks to avoid terminal marking it as another command
 
+if torch.accelerator.is_available():
+    device = torch.device(torch.accelerator.current_accelerator())
+else:
+    device = torch.device("cpu")
+
 def main():
 
     if len(sys.argv) != 4:
@@ -50,7 +55,7 @@ def load_model(model_name):
     paths = ProjectPaths()
     model_path = os.path.join(paths.final_model_save_folder, model_name)
     model = TrackNet()
-    model_state = torch.load(model_path, weights_only=True, map_location=torch.device("cpu"))
+    model_state = torch.load(model_path, weights_only=True, map_location=torch.device(device))
     model.load_state_dict(model_state)
     return model
 
@@ -117,7 +122,7 @@ def obtain_tracked_ball_data(frame_folder_path, model_name):
                 continue
             frame_ids = list(map(lambda x: os.path.join(frame_folder_path, f"frame_{x:08d}.jpg"), frame_ids))
             model_input = np.expand_dims(get_input(frame_ids), axis=0) # Add batch dimension, batch size just equals 1
-            model_input_tensor = torch.from_numpy(model_input).float()
+            model_input_tensor = torch.from_numpy(model_input).float().to(device)
             model_output_tensor = model(model_input_tensor, testing=True) # Shape is now (N, c, h, w) where N = 1
             model_output = model_output_tensor.detach().cpu().numpy()
             model_output = np.argmax(model_output, axis=1) # Shape is now (1, h, w); array of integers

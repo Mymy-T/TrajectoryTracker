@@ -9,6 +9,12 @@ import torch.nn as nn
 
 # TODO: Log hyperparam tuning results to a csv file for easy access, probably within paths.hyperparam_tuning_training_logs
 
+if torch.accelerator.is_available():
+    device = torch.device(torch.accelerator.current_accelerator())
+else:
+    device = torch.device("cpu")
+torch.set_default_device(device)
+
 class RunType(Enum):
     final_model_training = 0
     hyperparameter_tuning = 1
@@ -33,15 +39,20 @@ def train_and_evaluate_model(model, lr, batch_size, min_epochs, max_epochs, earl
     train_data = TrackNetDataset(DatasetType.train)
     valid_data = TrackNetDataset(DatasetType.valid)
     test_data = TrackNetDataset(DatasetType.test)
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True)
-    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, shuffle=False)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
+
+    running_on_cpu = (device.type == "cpu") # Pin memory if a gpu is present; this prevents allocated tensors from being moved to disk, speeding up how fast the tensors can be forwarded to the gpu
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, pin_memory=(not running_on_cpu))
+    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, shuffle=False, pin_memory=(not running_on_cpu))
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, pin_memory=(not running_on_cpu))
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = nn.CrossEntropyLoss()
 
     best_loss = float("inf")
     counter = 0 # Counts number of times valid_loss didn't improve from last epoch
     for epoch in range(1, max_epochs + 1):
-        train_loss = _train_epoch(model, train_dataloader, lr, epoch, verbose=verbose)
-        valid_loss = _evaluate(model, valid_dataloader, valid=True, verbose=verbose)
+        train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, verbose=verbose)
+        valid_loss = _evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch)
         writer.flush()
 
@@ -58,10 +69,10 @@ def train_and_evaluate_model(model, lr, batch_size, min_epochs, max_epochs, earl
             if verbose:
                 print(f"Training of {name} stopped early on epoch {epoch} of {max_epochs}")
             break
-    
-    model.load_state_dict(torch.load(model_save_path, weights_only=True)) # Load the best model
+    model_state = torch.load(model_save_path, weights_only=True, map_location=device)
+    model.load_state_dict(model_state) # Load the best model
     if run_type == RunType.final_model_training:
-        test_loss = _evaluate(model, test_dataloader, valid=False, verbose=verbose)
+        test_loss = _evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Test": test_loss}, global_step=1)
         writer.flush()
         writer.close()
@@ -72,17 +83,17 @@ def train_and_evaluate_model(model, lr, batch_size, min_epochs, max_epochs, earl
 
 
 
-def _train_epoch(model, train_loader, lr, epoch, verbose):
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    loss_fn = nn.CrossEntropyLoss()
+def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, verbose):
     model.train()
-    
     total_loss = 0
     for idx, batch in enumerate(train_loader): # batch is (inputs, outputs)
+        inputs = batch[0].to(device)
+        outputs = batch[1].to(device)
         optimizer.zero_grad()
-        pred = model(batch[0])
-        loss = loss_fn(pred, batch[1])
+        pred = model(inputs)
+        loss = loss_fn(pred, outputs)
         loss.backward()
+        optimizer.step()
         total_loss += loss.item()
         if verbose:
             print(f"Avg loss for batch {idx + 1}: {loss.item():.4f}")
@@ -93,14 +104,15 @@ def _train_epoch(model, train_loader, lr, epoch, verbose):
     return avg_loss
     
 
-def _evaluate(model, data_loader, valid, verbose=True):
-    loss_fn = nn.CrossEntropyLoss()
+def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
     model.eval()
     with torch.inference_mode():
         total_loss = 0
         for idx, batch in enumerate(data_loader): # batch is (inputs, outputs)
-            pred = model(batch[0])
-            loss = loss_fn(pred, batch[1])
+            inputs = batch[0].to(device)
+            outputs = batch[1].to(device)
+            pred = model(inputs)
+            loss = loss_fn(pred, outputs)
             total_loss += loss.item()
             if verbose:
                 print(f"Avg loss for batch {idx + 1}: {loss.item():.4f}")
