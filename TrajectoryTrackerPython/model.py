@@ -1,5 +1,8 @@
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
+import train_settings
 
 # Credit to yastrebksv's implementation of TrackNet on github: https://github.com/yastrebksv/TrackNet/blob/main/model.py
 
@@ -78,7 +81,43 @@ class TrackNet(nn.Module):
         # out = x.reshape(batch_size, self.out_channels, -1)
         if testing:
             out = self.softmax(out)
-        return out                       
+        return out # Shape is (batch_size, out_channels, h, w); for this project, it's (batch_size, 256, 360, 640)
+    
+    def process_output(self, probs):
+        """
+        Shape is transformed from (num_batches, out_channels, h, w) to (num_batches, h, w) where the probs along the channel dimension are collapsed using argmax
+        """
+        out = probs.detach().cpu().numpy()
+        out = np.argmax(out, axis=1)
+        return out
+    
+    def filter_by_threshold(self, output, threshold=128):
+        # For model output, map any pixels with value < t to 0, otherwise 255 (after using softmax) where t is threshold; in paper, t=128
+        return np.where(output >= threshold, 255, 0).astype(np.uint8) # uint8 required for cv2.HoughCircles
+
+    def obtain_ball_center_coords(self, filtered_output):
+        """
+        Returns a list of the detected ball's center x, center y, and radius; returns None if no ball or more than 1 ball is detected
+        """
+        # Use Hough Gradient Method, and return the center coords of the ball; make sure only one circle is detected, otherwise no ball
+        circles = cv2.HoughCircles( # Shape of circles is (1, n_circles_detected, 3); the first dim is byproduct of underlying implementation; the third consists of [x, y, radius]
+            filtered_output,          # Your normalized, single-channel TrackNet heatmap
+            method=cv2.HOUGH_GRADIENT,
+            dp=1,                  # Keep at 1 for exact pixel accuracy
+            minDist=15,            # Only 1 ball should be found
+            param1=20,             # Low value to find the gradual intensity transitions, no sharp edges
+            param2=10,             # Low value takens into account small/faint ball blobs when ball is far away
+            minRadius=2,           # Accounts for the ball when it is furthest from camera
+            maxRadius=30           # Accounts for the ball when it is closest to camera
+        )
+
+        if circles is None:
+            return None
+        
+        if circles.shape[1] != 1:
+            return None
+        
+        return list(circles[0][0]) # Returns [x, y, radius]
     
     def _init_weights(self):
         for module in self.modules():
@@ -94,13 +133,13 @@ class TrackNet(nn.Module):
 
     
 if __name__ == '__main__':
-    if torch.accelerator.is_available():
-        device = torch.device(torch.accelerator.current_accelerator())
-    else:
-        device = torch.device("cpu")
+    device =train_settings.device
+    print(f"Testing on device: {device.type}")
     model = TrackNet().to(device)
-    input = torch.rand(1, 9, 360, 640)
-    out = model(input)
+    input = torch.rand(1, 9, 360, 640).to(device)
+    out = model(input) # Shape should be (1, 256, 360, 640)
+    testing_out = np.squeeze(model.process_output(out), axis=0) # Shape should be (360, 640)
     print(f"out shape = {out.shape}")
+    print(f"testing mode out shape = {testing_out.shape}")
     
     

@@ -2,13 +2,11 @@ import torch
 from model import TrackNet
 from paths import ProjectPaths
 from trainer import train_and_evaluate_model, RunType
+import train_settings
 
 
 paths = ProjectPaths()
-if torch.accelerator.is_available():
-    device = torch.device(torch.accelerator.current_accelerator())
-else:
-    device = torch.device("cpu")
+device = train_settings.device
 model = TrackNet()
 pretrained_state = torch.load(paths.pretrained_model_path, weights_only=True, map_location=torch.device(device))
 model.load_state_dict(pretrained_state)

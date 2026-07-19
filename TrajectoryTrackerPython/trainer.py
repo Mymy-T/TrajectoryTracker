@@ -1,19 +1,17 @@
 from dataset import TrackNetDataset, DatasetType
 from enum import Enum
+import math
 import os
 from paths import ProjectPaths
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
+import train_settings
 
 # TODO: Log hyperparam tuning results to a csv file for easy access, probably within paths.hyperparam_tuning_training_logs
 
-if torch.accelerator.is_available():
-    device = torch.device(torch.accelerator.current_accelerator())
-else:
-    device = torch.device("cpu")
-torch.set_default_device(device)
+device = train_settings.device
 
 class RunType(Enum):
     final_model_training = 0
@@ -82,6 +80,49 @@ def train_and_evaluate_model(model, lr, batch_size, min_epochs, max_epochs, earl
         return best_loss
 
 
+def _obtain_batch_eval_metrics(model, pred, label, center_diff_tolerance=5): # NOTE center_diff_tolerance is in 360 by 640 space, not 1080 by 1920 space
+    """
+    In deployment, the model should ideally have a low prediction error for the center of the ball, when it is a true positive. It is fine if the model misses some balls, but not if it makes up ball data when there is none. Therefore, precision is used as the primary metric, with mean center error as the secondary metric. Recall is computed as a sanity check to prevent extremely low recall.
+    returns tp, tn, fp, fn, mae
+    tp - true positiive - ground truth has 1 ball, output of hough circles gives exactly 1 ball sufficiently localized
+    tn - true negative - ground truth has 0 balls, output of hough circles gives either no balls or more than 1 ball (any output with >1 ball is considered a negative output)
+    fp - false positive - ground truth has 0 balls, output of hough circles gives exactly 1 ball, regardless of location; also if ground truth has 1 ball, output of hough circles gives exactly 1 ball not sufficiently localized
+    fn - false negative - ground truth has 1 ball, output of hough circles gives either no balls or more than 1 ball (any output with >1 ball is considered a negative output); also if ground truth has 1 ball, output of hough circles gives exactly 1 ball not sufficiently localized
+    mde - mean distance error for the center coords; only calculated for tp examples
+    """
+    # pred has shape (N, c, h, w); label has shape (N, h, w)
+    tp = 0
+    tn = 0
+    fp = 0
+    fn = 0
+    tot_error = 0
+    no_ball_heatmap = torch.zeros(label.shape[1:]).to(device)
+    pred = model.process_output(pred) # Shape (N, h, w)
+    pred = model.filter_by_threshold(pred)
+    for i in range(label.shape[0]):
+        gt_is_negative = torch.allclose(label[i, :], no_ball_heatmap, atol=1e-6)
+        ball_point = model.obtain_ball_center_coords(pred[i])
+        if ball_point is not None: # [x, y, radius]
+            if gt_is_negative:
+                fp += 1
+            else:
+                gt_flattened_max_idx = torch.argmax(label[i]) # Get brightest coord in heatmap; this is the always the gt center
+                gt_x, gt_y = torch.unravel_index(gt_flattened_max_idx, label.shape[1:])
+                x, y, _ = ball_point
+                center_diff = math.sqrt((x - gt_x)**2 + (y - gt_y)**2)
+                if center_diff > center_diff_tolerance:
+                    fp += 1
+                    fn += 1
+                else:
+                    tp += 1
+                    tot_error += center_diff
+        else:
+            if gt_is_negative:
+                tn += 1
+            else:
+                fn += 1
+    mde = tot_error / tp if tp > 0 else None
+    return tp, tn, fp, fn, mde
 
 def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, verbose):
     model.train()
@@ -114,6 +155,7 @@ def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
             pred = model(inputs)
             loss = loss_fn(pred, outputs)
             total_loss += loss.item()
+            
             if verbose:
                 print(f"Avg loss for batch {idx + 1}: {loss.item():.4f}")
         avg_loss = total_loss/len(data_loader)

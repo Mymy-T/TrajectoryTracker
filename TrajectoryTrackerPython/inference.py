@@ -7,6 +7,7 @@ from paths import ProjectPaths
 import sys
 import torch
 from tqdm import trange
+import train_settings
 
 # TODO: Create an mp4 video of the heatmaps too (before threshold is applied)
 
@@ -19,10 +20,7 @@ from tqdm import trange
 # sample_video_name (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
 # NOTE: When passing in inference_video_folder or sample_video_name, it may be necessary to enclose it in quotation marks to avoid terminal marking it as another command
 
-if torch.accelerator.is_available():
-    device = torch.device(torch.accelerator.current_accelerator())
-else:
-    device = torch.device("cpu")
+device = train_settings.device
 
 def main():
 
@@ -77,30 +75,6 @@ def get_input(img_paths):
         imgs = imgs.astype(np.float32) / 255.0 # Normalize pixel values to [0, 1] as done in training
         return imgs
 
-def filter_by_threshold(output, threshold=128):
-    # For model output, map any pixels with value < t to 0, otherwise 255 (after using softmax) where t is threshold; in paper, t=128
-    return np.where(output >= threshold, 255, 0).astype(np.uint8) # uint8 required for cv2.HoughCircles
-
-def obtain_ball_center_coords(filtered_output):
-    # Use Hough Gradient Method, and return the center coords of the ball; make sure only one circle is detected, otherwise no ball
-    circles = cv2.HoughCircles( # Shape of circles is (1, n_circles_detected, 3); the first dim is byproduct of underlying implementation; the third consists of [x, y, radius]
-        filtered_output,          # Your normalized, single-channel TrackNet heatmap
-        method=cv2.HOUGH_GRADIENT,
-        dp=1,                  # Keep at 1 for exact pixel accuracy
-        minDist=15,            # Only 1 ball should be found
-        param1=20,             # Low value to find the gradual intensity transitions, no sharp edges
-        param2=10,             # Low value takens into account small/faint ball blobs when ball is far away
-        minRadius=2,           # Accounts for the ball when it is furthest from camera
-        maxRadius=30           # Accounts for the ball when it is closest to camera
-    )
-
-    if circles is None:
-        return None
-    
-    if circles.shape[1] != 1:
-        return None
-    
-    return list(circles[0][0])
 
 def obtain_tracked_ball_data(frame_folder_path, model_name):
     model = load_model(model_name) # Load the trained model
@@ -123,13 +97,12 @@ def obtain_tracked_ball_data(frame_folder_path, model_name):
             frame_ids = list(map(lambda x: os.path.join(frame_folder_path, f"frame_{x:08d}.jpg"), frame_ids))
             model_input = np.expand_dims(get_input(frame_ids), axis=0) # Add batch dimension, batch size just equals 1
             model_input_tensor = torch.from_numpy(model_input).float().to(device)
-            model_output_tensor = model(model_input_tensor, testing=True) # Shape is now (N, c, h, w) where N = 1
-            model_output = model_output_tensor.detach().cpu().numpy()
-            model_output = np.argmax(model_output, axis=1) # Shape is now (1, h, w); array of integers
+            model_output_tensor = model(model_input_tensor, testing=True) # Shape is now (N, c, h, w)
+            model_output = model.process_output(model_output_tensor) # Shape is now (1, h, w) since batch size (N) = 1
             model_output = np.squeeze(model_output, axis=0) # Shape is now (h, w); 2d array required for cv2.HoughCircles
             cv2.imwrite(os.path.join(heatmap_folder, f"frame_{i:08d}_heatmap.png"), model_output) # Save intermediate heatmaps
-            model_output = filter_by_threshold(model_output)
-            ball_point = obtain_ball_center_coords(filtered_output=model_output)
+            model_output = model.filter_by_threshold(model_output)
+            ball_point = model.obtain_ball_center_coords(filtered_output=model_output)
             if ball_point is not None:
                 scale_factor = 1080/360 # Multiply center coords by a scale factor to get from 360 x 640 to 1080 x 1920
                 ball_point = list(map(lambda x: int(x*scale_factor), ball_point)) # ints used so it can be used when OpenCV draws circles
