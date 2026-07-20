@@ -23,26 +23,9 @@ class RunType(Enum):
 
 # TODO: Write performance to csv file if run_type is hyperparameter tuning
 def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, run_type: RunType, verbose=True):
-
-    # def _compute_wilson_interval(p, n, conf=0.95):
-    #     alpha = 1 - conf
-    #     pos_z_prob = conf + ((1 - conf) / 2) # prob from the left tail end, added to the "inner" area for conf interval; using inverse cdf gives the positive z bound, which is equal to |z|
-    #     z = NormalDist().inv_cdf(pos_z_prob)
-
-    #     denom = 1 + (z**2 / n)
-    #     p_adjusted = p + (z**2 / (2*n))
-    #     stdev_adjusted = z * math.sqrt((p * (1 - p) / n) + (z**2 / (4 * n**2)))
-
-    #     lower_bound = (p_adjusted - stdev_adjusted) / denom
-    #     upper_bound = (p_adjusted + stdev_adjusted) / denom
-
-    #     return lower_bound, upper_bound
-        
-
-
+    
     def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.001, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
         """
-        # OLD: checkpoint_model, new_model - tuples of (tp, tp+fp, mde, recall)
         checkpoint_model, new_model - tuples of (precision, mde, recall, epoch)
         returns True is new model is better, False otherwise
         """
@@ -51,18 +34,13 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
             if not checkpoint_model[2] < min_recall: # If the checkpoint model also has bad recall, continue and check precision, else return False
                 return False
             
-        # Check precision; wilson confidence interval overlap at 95% confidence used as rough comparison measure
-        # p_checkpoint = checkpoint_model[0] / checkpoint_model[1]
-        # n_checkpoint = checkpoint_model[1]
-        # p_new = new_model[0] / new_model[1]
-        # n_new = new_model[1]
-        # lb_checkpoint, ub_checkpoint = _compute_wilson_interval(p_checkpoint, n_checkpoint)
-        # lb_new, ub_new = _compute_wilson_interval(p_new, n_new)
-        # overlapping = not ((ub_checkpoint < lb_new) or (ub_new < lb_checkpoint))
+        # Check precision
         if new_model[0] > checkpoint_model[0] + precision_diff_threshold:
             return True
         elif abs(checkpoint_model[0] - new_model[0]) <= precision_diff_threshold:
-            return new_model[1] < checkpoint_model[1] # Check mde
+            mde_checkpoint = checkpoint_model[1] if checkpoint_model[1] is not None else float("inf")
+            mde_new = new_model[1] if new_model[1] is not None else float("inf")
+            return mde_new < mde_checkpoint # Check mde
         
         return False
 
@@ -193,7 +171,6 @@ def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOT
                 tn += 1
             else:
                 fn += 1
-    # mde = tot_error / tp if tp > 0 else None
     return tp, tn, fp, fn, dist_error_sum
 
 def compute_eval_metrics(tp, tn, fp, fn, dist_error_sum):
