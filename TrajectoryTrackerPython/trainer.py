@@ -21,7 +21,7 @@ class RunType(Enum):
     final_model_training = 0
     hyperparameter_tuning = 1
 
-# TODO: Write performance to csv file if run_type is hyperparameter tuning
+
 def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, run_type: RunType, verbose=True):
     
     def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.001, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
