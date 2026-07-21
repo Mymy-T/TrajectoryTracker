@@ -1,5 +1,6 @@
 import os
 from paths import ProjectPaths
+import re
 import sys
 import yt_dlp
 
@@ -21,14 +22,16 @@ end_time_filepart = end_time.replace(":", "-")
 
 # Fast metadata extraction
 print("Extracting video metadata...")
-meta_opts = {'quiet': True}
+meta_opts = {"quiet": True}
 with yt_dlp.YoutubeDL(meta_opts) as ydl:
     info_dict = ydl.extract_info(video_url, download=False)
-    real_title = info_dict.get('title', 'video').replace("/", "_").replace("\\", "_").replace("|", "_").replace(" ", "_")
+    title = info_dict.get("title", "video")
+    title = re.sub(r'[<>:"/\\|?*]', "_", title)
+
 
 actual_final_path = os.path.join(
     project_paths.videos_folder, 
-    f"{real_title}_{start_time_filepart}_to_{end_time_filepart}.mp4"
+    f"{title}_{start_time_filepart}_to_{end_time_filepart}.mp4"
 )
 
 # Download only the required chunk directly from YouTube's server
@@ -36,7 +39,7 @@ print(f"Fetching and slicing clip from {start_time} to {end_time}...")
 
 ydl_opts = {
     # H.264 (avc1) codec for full OpenCV compatibility
-    "format": "bestvideo[height<=1080][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4][vcodec^=avc1]/best",
+    "format": "bestvideo[height=1080][fps=60][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]", # NOTE: This will throw an error if any of the conditions aren't met.
     "merge_output_format": "mp4",
     "outtmpl": actual_final_path,
     "quiet": True,
