@@ -59,7 +59,31 @@ ydl_opts = {
 }
 
 
-with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-    ydl.download([video_url])
+# with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+#     ydl.download([video_url])
+
+try:
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([video_url])
+except yt_dlp.utils.DownloadError:
+    print("\nAvailable video formats:\n")
+
+    with yt_dlp.YoutubeDL({"quiet": True}) as ydl:
+        info = ydl.extract_info(video_url, download=False)
+
+    for f in info["formats"]:
+        if f.get("vcodec") == "none":
+            continue  # Skip audio-only streams
+
+        print(
+            f"id={f["format_id"]:>4}  "
+            f"{f.get("height")}p  "
+            f"{f.get("fps")}fps  "
+            f"{f.get("vcodec")}  "
+            f"{f.get("ext")}"
+        )
+    
+    print("Failure to download clip.")
+    sys.exit()
 
 print(f"Success! Saved clip in {actual_final_path}")
