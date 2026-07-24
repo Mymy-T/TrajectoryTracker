@@ -5,55 +5,39 @@
 //  Created by Milo on 6/14/26.
 //
 
-import CoreML
 import SwiftUI
-import Vision
+
+enum AnalysisTab: String, CaseIterable, Identifiable {
+    case video = "Video"
+    case simulator = "Simulator"
+
+    var id: Self { self }
+}
 
 struct AnalysisView: View {
-    
+
     let videoPath: URL
-    
-    @State private var presentingExportFrameConfirmation = false
-    
+
+    @State private var selectedTab: AnalysisTab = .video
+
     var body: some View {
         VStack {
-            VideoPlayerView(videoPath: videoPath)
-            
-            Text("TODO")
-            
-        }.navigationTitle("Analysis")
+            Picker("Tab", selection: $selectedTab) {
+                ForEach(AnalysisTab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+
+            switch selectedTab {
+            case .video:
+                VideoAnalysisView(videoPath: videoPath)
+            case .simulator:
+                SimulatorView()
+            }
+        }
+        .navigationTitle("Analysis")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    presentingExportFrameConfirmation = true
-                } label: {
-                    Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(.green)
-                }
-            }
-        }
-        .alert("Export & Save?", isPresented: $presentingExportFrameConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Yes", role: .confirm) {
-                Task {
-                    do {
-                        try await exportVideoFrames(videoURL: videoPath)
-                    } catch ExportVideoError.generatorError(message: let message) {
-                        print("Generator Image Creation Error - \(message)")
-                    } catch ExportVideoError.imageConversionError(message: let message) {
-                        print("Image Conversion Error - \(message)")
-                    } catch ExportVideoError.imageSavingError(message: let message) {
-                        print("Image Saving Error - \(message)")
-                    } catch ExportVideoError.videoTrackLoadingFailure(message: let message) {
-                        print("Video Track Loading Error - \(message)")
-                    } catch ExportVideoError.folderCreationError(message: let message) {
-                        print("Folder Creation Error - \(message)")
-                    } catch {
-                        print("Unknown error: \(error.localizedDescription)")
-                    }
-                }
-            }
-        }
     }
 }

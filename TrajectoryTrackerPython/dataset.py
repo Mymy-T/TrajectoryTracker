@@ -40,7 +40,7 @@ class TrackNetDataset(Dataset):
         return (inputs, outputs)
     
     def _get_output(self, heatmap_path):
-        img = cv2.imread(heatmap_path, cv2.IMREAD_GRAYSCALE)
+        img = cv2.imread(heatmap_path, cv2.IMREAD_GRAYSCALE).astype(np.int64)
         # img = np.clip(img, 0, 255).astype(np.int32)
         # output = np.zeros((self.height, self.width, 256), dtype=np.float32) # Each pixel has a len 256 one-hot encoded vector; position of 1 corresponds to brightness value of pixel
         # grid_h, grid_w = np.ogrid[:self.height, :self.width] # grid_h is of shape (h, 1); grid_w is of shape (1, w)

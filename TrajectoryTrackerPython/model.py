@@ -91,8 +91,8 @@ class TrackNet(nn.Module):
         out = np.argmax(out, axis=1)
         return out
     
-    def filter_by_threshold(self, output, threshold=128):
-        # For model output, map any pixels with value < t to 0, otherwise 255 (after using softmax) where t is threshold; in paper, t=128
+    def filter_by_threshold(self, output, threshold=100):
+        # For model output, map any pixels with value < t to 0, otherwise 255 (after using softmax) where t is threshold; in paper, t=128; adjusted experimentally
         return np.where(output >= threshold, 255, 0).astype(np.uint8) # uint8 required for cv2.HoughCircles
 
     def obtain_ball_center_coords(self, filtered_output):
@@ -105,8 +105,8 @@ class TrackNet(nn.Module):
             method=cv2.HOUGH_GRADIENT,
             dp=1,                  # Keep at 1 for exact pixel accuracy
             minDist=15,            # Only 1 ball should be found
-            param1=20,             # Low value to find the gradual intensity transitions, no sharp edges
-            param2=10,             # Low value takens into account small/faint ball blobs when ball is far away
+            param1=50,             # Sharpness of transitions, higher means sharper edges detected
+            param2=4,             # Low value takens into account small/faint ball blobs when ball is far away
             minRadius=2,           # Accounts for the ball when it is furthest from camera
             maxRadius=30           # Accounts for the ball when it is closest to camera
         )

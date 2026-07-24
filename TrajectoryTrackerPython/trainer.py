@@ -57,8 +57,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         os.mkdir(log_path)
         writer = SummaryWriter(log_dir=log_path)
     else:
-        print(f"ERROR: A run with the same log name ({name}) has already been saved. Please either delete the previous run, or rename this run.")
-        raise
+        raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, or rename this run.")
 
     if not os.path.exists(model_save_folder):
         # base path is final_models/name; inside, there is a "checkpoints" folder to save all model checkpoints, and a model save file for the best model from the "checkpoints" folder
@@ -66,8 +65,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         checkpoints_folder = os.path.join(model_save_folder, "checkpoints")
         os.mkdir(checkpoints_folder)
     else:
-        print(f"ERROR: A model with the same name ({name}) has already been saved. Please either delete the models from the previous run, or rename this run.")
-        raise
+        raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the models from the previous run, or rename this run.")
 
     train_data = TrackNetDataset(DatasetType.train)
     valid_data = TrackNetDataset(DatasetType.valid)
@@ -81,13 +79,16 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.CrossEntropyLoss()
 
-    best_model_metrics = [] # list of tuples of (tp, tp+fp, mean_dist_error, recall); tp, tp+fp used to calculate and compare precision, which is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
+    best_model_metrics = [] # list of tuples of (precision, mean_dist_error, recall); precision is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
     for epoch in range(1, max_epochs + 1):
         train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, verbose=verbose)
         valid_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) # Graph shows loss for both train & valid set (used to check for overfitting/underfitting)
-        writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict={"Precision": precision, "MDE": mde, "Recall": recall}, global_step=epoch) # Graph for validation set only
+        eval_metrics = {"Precision": precision, "Recall": recall}
+        if mde is not None:
+            eval_metrics["MDE"] = mde
+        writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=eval_metrics, global_step=epoch) # Graph for validation set only; MDE omitted on steps with no true positives, rather than logging a spike
         writer.flush()
 
         if epoch <= checkpoints:
@@ -111,7 +112,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
     
     best_idx = 0
     for i in range(1, len(best_model_metrics)):
-        if _compare_model_performance(checkpoint_model=best_model_metrics[worst_idx], new_model=best_model_metrics[i]): # If true, worst_idx doesn't refer to worst model checkpoint
+        if _compare_model_performance(checkpoint_model=best_model_metrics[best_idx], new_model=best_model_metrics[i]): # If true, worst_idx doesn't refer to worst model checkpoint
             best_idx = i
     best_model_path = os.path.join(checkpoints_folder, f"epoch_{best_model_metrics[best_idx][3]}")
     model_state = torch.load(best_model_path, weights_only=True, map_location=device)
@@ -121,7 +122,10 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         test_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Test": test_loss}, global_step=1)
-        writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict={"TestPrecision": precision, "TestMDE": mde, "TestRecall": recall}, global_step=1)
+        test_eval_metrics = {"TestPrecision": precision, "TestRecall": recall}
+        if mde is not None:
+            test_eval_metrics["TestMDE"] = mde
+        writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=test_eval_metrics, global_step=1)
         writer.flush()
         writer.close()
         return test_loss, precision, mde, recall
@@ -146,7 +150,7 @@ def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOT
     fp = 0
     fn = 0
     dist_error_sum = 0
-    no_ball_heatmap = torch.zeros(label.shape[1:]).to(device)
+    no_ball_heatmap = torch.zeros(label.shape[1:], dtype=label.dtype).to(device)
     pred = model.process_output(pred) # Shape (N, h, w)
     pred = model.filter_by_threshold(pred)
     for i in range(label.shape[0]):
@@ -157,9 +161,9 @@ def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOT
                 fp += 1
             else:
                 gt_flattened_max_idx = torch.argmax(label[i]) # Get brightest coord in heatmap; this is the always the gt center
-                gt_x, gt_y = torch.unravel_index(gt_flattened_max_idx, label.shape[1:])
-                x, y, _ = ball_point
-                center_diff = math.sqrt((x - gt_x)**2 + (y - gt_y)**2)
+                gt_row, gt_col = torch.unravel_index(gt_flattened_max_idx, label.shape[1:]) # unravel_index on a (h, w) shape returns (row, col)
+                x, y, _ = ball_point # HoughCircles returns (x=col/width, y=row/height, radius)
+                center_diff = math.sqrt((x - gt_col)**2 + (y - gt_row)**2)
                 if center_diff > center_diff_tolerance:
                     fp += 1
                     fn += 1
@@ -226,7 +230,8 @@ def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
             if verbose:
                 print(f"Avg loss for batch {idx + 1}: {loss.item():.4f}")
         avg_loss = total_loss/len(data_loader)
-        precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, error_tot)
+        precision, mde, recall = compute_eval_metrics(tp_tot, tn_tot, fp_tot, fn_tot, error_tot)
+        mde_str = f"{mde:.4f}" if mde is not None else "N/A"
         if verbose:
             if valid:
                 name = "validation"
@@ -234,7 +239,7 @@ def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
                 name = "test"
             print(f"Avg {name} loss: {avg_loss:.4f}")
             print(f"{name} precision: {precision:.4f}")
-            print(f"Avg {name} dist error: {mde:.4f}")
+            print(f"Avg {name} dist error: {mde_str}")
             print(f"{name} recall: {recall:.4f}")
         
         return avg_loss, tp_tot, tn_tot, fp_tot, fn_tot, error_tot

@@ -1,6 +1,7 @@
 import cv2
 import os
 from paths import ProjectPaths
+import sys
 
 
 def process_all_videos(video_folder_path, output_folder_path):
@@ -55,7 +56,7 @@ def get_match_title(filename):
         return match_part
         
     print(f"Error with video name: {filename} is not of the form 'title_XX-XX-XX_to_XX-XX-XX'")
-    raise
+    sys.exit(1)
 
 def extract_clip_frames(video_path, output_dir):
     vidcap = cv2.VideoCapture(video_path)

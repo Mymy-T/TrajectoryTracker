@@ -24,7 +24,7 @@ class ProjectPaths:
         # Model Paths
         self.final_model_save_folder = os.path.join(os.getcwd(), "model_saves", "final_models")
         self.hyperparam_tuning_model_save_folder = os.path.join(os.getcwd(), "model_saves", "hparam_tune_models")
-        self.pretrained_model_path = os.path.join(os.getcwd(), "pretrained_model.pt")
+        self.pretrained_model_path = os.path.join(self.final_model_save_folder, "pretrained_model.pt")
 
         # Testing
         self.videos_for_inference_folder = os.path.join(os.getcwd(), "inference_videos")

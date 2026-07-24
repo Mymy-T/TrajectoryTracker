@@ -31,13 +31,15 @@ def main():
     paths = ProjectPaths()
     model_name = sys.argv[1]
     inference_video_folder = os.path.join(paths.videos_for_inference_folder, sys.argv[3])
+    frames_folder = os.path.join(inference_video_folder, "frames")
+    if not os.path.exists(inference_video_folder):
+            os.mkdir(inference_video_folder)
+    if not os.path.exists(frames_folder):
+        os.mkdir(frames_folder)
 
     if sys.argv[2] == "False":
         original_video_filename = f"{sys.argv[3]}.mp4"
-        if not os.path.exists(inference_video_folder):
-            os.mkdir(inference_video_folder)
-        
-        extract_clip_frames(video_path=os.path.join(paths.videos_folder, original_video_filename), output_dir=inference_video_folder)
+        extract_clip_frames(video_path=os.path.join(paths.videos_folder, original_video_filename), output_dir=frames_folder)
         print("Frames extracted")
     elif sys.argv[2] == "True":
         pass
@@ -45,9 +47,9 @@ def main():
         print("arg <preexisting_video> must be either 'True' or 'False'")
         sys.exit(1)
     
-    tracked_ball_points = obtain_tracked_ball_data(frame_folder_path=inference_video_folder, model_name=model_name)
-    create_heatmap_video(inference_video_name=inference_video_folder)
-    create_annotated_video(inference_video_name=inference_video_folder, tracked_ball_points=tracked_ball_points)
+    tracked_ball_points = obtain_tracked_ball_data(inference_video_folder=inference_video_folder, model_name=model_name)
+    create_heatmap_video(inference_video_folder=inference_video_folder)
+    create_annotated_video(inference_video_folder=inference_video_folder, tracked_ball_points=tracked_ball_points)
 
 def load_model(model_name):
     paths = ProjectPaths()
@@ -55,6 +57,7 @@ def load_model(model_name):
     model = TrackNet()
     model_state = torch.load(model_path, weights_only=True, map_location=torch.device(device))
     model.load_state_dict(model_state)
+    model.to(device)
     return model
 
 def create_frame_sequence(i, seq_len=3):
@@ -76,15 +79,16 @@ def get_input(img_paths):
         return imgs
 
 
-def obtain_tracked_ball_data(frame_folder_path, model_name):
+def obtain_tracked_ball_data(inference_video_folder, model_name):
     model = load_model(model_name) # Load the trained model
     model.eval()
+    frames_path = os.path.join(inference_video_folder, "frames")
 
     # Loop through the frames and run each frame sequence through the model; frames should be sorted in order and have names of the form frame_########.jpg
-    frames = [frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
+    frames = [frame for frame in os.listdir(frames_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
     ball_points = {}
     # Make a directory to save the intermediate heatmaps before thresholding has been applied
-    heatmap_folder = os.path.join(frame_folder_path, "heatmaps")
+    heatmap_folder = os.path.join(inference_video_folder, "heatmaps")
     if not os.path.exists(heatmap_folder):
         os.mkdir(heatmap_folder)
     with torch.inference_mode():
@@ -94,7 +98,7 @@ def obtain_tracked_ball_data(frame_folder_path, model_name):
                 heatmap = np.zeros((360, 640))# Write an empty intermediate heatmap
                 cv2.imwrite(os.path.join(heatmap_folder, f"frame_{i:08d}_heatmap.png"), heatmap) # Save intermediate heatmaps
                 continue
-            frame_ids = list(map(lambda x: os.path.join(frame_folder_path, f"frame_{x:08d}.jpg"), frame_ids))
+            frame_ids = list(map(lambda x: os.path.join(frames_path, f"frame_{x:08d}.jpg"), frame_ids))
             model_input = np.expand_dims(get_input(frame_ids), axis=0) # Add batch dimension, batch size just equals 1
             model_input_tensor = torch.from_numpy(model_input).float().to(device)
             model_output_tensor = model(model_input_tensor, testing=True) # Shape is now (N, c, h, w)
@@ -109,16 +113,16 @@ def obtain_tracked_ball_data(frame_folder_path, model_name):
                 ball_points[i] = ball_point
     return ball_points
 
-def create_heatmap_video(inference_video_name):
+def create_heatmap_video(inference_video_folder):
     # Video saved to the same folder as the frames (not heatmaps)
     paths = ProjectPaths()
-    output_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, "heatmap_video.mp4")
+    output_path = os.path.join(inference_video_folder, "heatmap_video.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Standard MP4 codec
     output_fps = 60.0
     frame_size = (1920, 1080)
     video_writer = cv2.VideoWriter(output_path, fourcc, output_fps, frame_size)
 
-    heatmap_folder_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, "heatmaps") # Folder where saved heatmaps will be
+    heatmap_folder_path = os.path.join(inference_video_folder, "heatmaps") # Folder where saved heatmaps will be
     heatmaps = [heatmap for heatmap in os.listdir(heatmap_folder_path) if not heatmap.startswith(".")] # All heatmaps have a name of the form frame_########.png; ignore hidden files such as .DS_Store
     for i in trange(len(heatmaps), desc="Generating output heatmap video..."):
         heatmap_path = os.path.join(heatmap_folder_path, f"frame_{i:08d}_heatmap.png")
@@ -129,16 +133,16 @@ def create_heatmap_video(inference_video_name):
     video_writer.release()
     print("Heatmap video saved successfully!")
 
-def create_annotated_video(inference_video_name, tracked_ball_points):
+def create_annotated_video(inference_video_folder, tracked_ball_points):
     # Video saved to the same folder as the frames
     paths = ProjectPaths()
-    output_path = os.path.join(paths.videos_for_inference_folder, inference_video_name, "annotated_video.mp4")
+    output_path = os.path.join(inference_video_folder, "annotated_video.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Standard MP4 codec
     output_fps = 60.0
     frame_size = (1920, 1080)
     video_writer = cv2.VideoWriter(output_path, fourcc, output_fps, frame_size)
 
-    frame_folder_path = os.path.join(paths.videos_for_inference_folder, inference_video_name) # Folder where saved video frames will be
+    frame_folder_path = os.path.join(inference_video_folder, "frames") # Folder where saved video frames will be
     frames = [frame for frame in os.listdir(frame_folder_path) if not frame.startswith(".")] # All frames have a name of the form frame_########.jpg; ignore hidden files such as .DS_Store
     for i in trange(len(frames), desc="Generating annotated video..."):
         frame_path = os.path.join(frame_folder_path, f"frame_{i:08d}.jpg")
