@@ -51,6 +51,13 @@ def _create_data_df(processed_data_path, frame_sequence_len):
             clip_folder = os.path.join(match_path, clip)
             img_folder = os.path.join(clip_folder, "images")
             T = len(os.listdir(img_folder))
+
+            missing_frame_nums = []
+            for i in range(T): # Check for frames that were skipped when dataset_creator.py was run
+                processed_img_path = os.path.join(img_folder, f"frame_{i:08d}.jpg") # label could be used too, it doesn't matter here
+                if not os.path.exists(processed_img_path):
+                    missing_frame_nums.append(i)
+
             unstacked_frame_nums = [[j for j in range(i, T - frame_sequence_len + 1 + i)] for i in range(frame_sequence_len)] # See d2l.ai, section 9.1.3; creates sequences of frame_sequence_len
             unstacked_frame_nums += [[j for j in range(frame_sequence_len - 1, T)]] # Duplicate last element so that it becomes the column for the ground truth heatmap path when stacked
             frame_nums = np.stack(unstacked_frame_nums, axis=1)
@@ -62,6 +69,12 @@ def _create_data_df(processed_data_path, frame_sequence_len):
             dataset_part = np.concatenate((img_paths, heatmap_paths), axis=1) # dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), and then heatmap(t); columns will be reversed outside the loop
             match_clip_id = f"{match}__{clip}"
             dataset_part = np.insert(dataset_part, dataset_part.shape[1], match_clip_id, axis=1)
+
+            if len(missing_frame_nums) != 0:
+                missing_frames = convert_num_to_img_path(missing_frame_nums) # Use img paths, as this will auto drop anywhere an invalid image appears, including when the label is also invalid (which occurs when the invalid image is at timestep t)
+                missing_frame_mask = np.isin(dataset_part, missing_frames).any(axis=1)
+                dataset_part = dataset_part[~missing_frame_mask] # Ignore invalid images/labels
+
             dataset_parts.append(dataset_part) # Final dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), then heatmap(t), then match_clip_id; will be reversed to match cols
 
     dataset = np.flip(np.concatenate(dataset_parts, axis=0), axis=1) # Combine all the parts, and then reverse the columns of dataset to get it to match the dataframe

@@ -7,7 +7,7 @@ from pathlib import Path
 from paths import ProjectPaths
 import sys
 
-def create_processed_dataset(data_path, processed_data_path):
+def create_processed_dataset(data_path, processed_data_path, inference_threshold=100):
     H = 1080
     W = 1920
     matches = [match for match in os.listdir(data_path) if not match.startswith(".")] # All matches have a name of the form match_####; ignore hidden files such as .DS_Store
@@ -68,7 +68,7 @@ def create_processed_dataset(data_path, processed_data_path):
                             negative = True
                         else:
                             negative = False
-                        training_img, gt_heatmap = create_training_data(img, center_x, center_y, s, negative)
+                        training_img, gt_heatmap = create_training_data(img, center_x, center_y, s, negative, inference_threshold)
                         cv2.imwrite(os.path.join(out_img_folder, img_names[i]), training_img)
                         base_filename = Path(img_names[i]).stem
                         cv2.imwrite(os.path.join(out_heatmap_folder, f"{base_filename}_heatmap.png"), gt_heatmap)
@@ -80,7 +80,7 @@ def create_processed_dataset(data_path, processed_data_path):
 
 
 
-def create_training_data(img_1080p, old_x, old_y, old_s, negative): # All annotations are square bounding boxes, so h = w
+def create_training_data(img_1080p, old_x, old_y, old_s, negative, inference_threshold): # All annotations are square bounding boxes, so h = w
     """
     Inputs - original image, coords of center of ball
     Outputs - resized image, gt heatmap
@@ -107,6 +107,9 @@ def create_training_data(img_1080p, old_x, old_y, old_s, negative): # All annota
     # Calculate sigma, see paper for details; the threshold is set to 73 (plug in r=5 and sigma^2 = 10 into original formula), so find sigma given that exp(-r^2 / 2*sigma^2) = 73/255 and that r = s/2
     # Rearranging and substituting r = s/2 gives sigma^2 = -s^2 / 8ln(73/255)
     sigma_sq = -(s**2) / (8*math.log(73/255))
+    min_threshold_radius = 2 # This is the minimum possible radius, according to the threshold utilized during inference, where HoughCiricles takes minRadius = 2; 
+    min_sigma_sq = math.ceil(-(min_threshold_radius**2) / (2*math.log(inference_threshold/255))) # Using r instead of s here; inference threshold instead of general ball threshold of 73
+    sigma_sq = max(sigma_sq, min_sigma_sq) # NOTE: min_sigma_sq corresponds to boundary where output is 100 having a radius of slight greater than 2 (due to ceil); this corresponds to a radius of slightly greater than ~2.31 for the boundary of the output of 73, computed using the equation r_73 = sqrt(-2 * min_sigma_sq * ln(73/255)) where min_sigma_sq before rounding was used
 
     dist_sq = (heatmap_x - x)**2 + (heatmap_y - y)**2  # Utilize broadcasting
     gaussian = np.exp(-dist_sq / (2 * sigma_sq))

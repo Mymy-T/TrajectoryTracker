@@ -16,7 +16,7 @@ import train_settings
 # NOTE: inference_video_name and sample_video_name are mutually exclusive; specify inference_video_folder if you set preexisting_video to True; specify sample_video_name if you set preexisting_video to False
 # preexisting_video is a bool, and should only take on True or False
 # inference_video_folder is the name of the folder in the project path "videos_for_inference" folder (no extension)
-# model_name is the name of the trained model, as saved in the project path "final_model_save" folder (include extension)
+# model_name is the name of the trained model, as saved in the project path "final_model_save" folder (do not include the .pt extension, it's added automatically)
 # sample_video_name (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
 # NOTE: When passing in inference_video_folder or sample_video_name, it may be necessary to enclose it in quotation marks to avoid terminal marking it as another command
 
@@ -53,6 +53,8 @@ def main():
 
 def load_model(model_name):
     paths = ProjectPaths()
+    if not model_name.endswith(".pt"):
+        model_name = model_name + ".pt"
     model_path = os.path.join(paths.final_model_save_folder, model_name)
     model = TrackNet()
     model_state = torch.load(model_path, weights_only=True, map_location=torch.device(device))

@@ -11,6 +11,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
+import torch.nn.functional as F
 import train_settings
 
 # TODO: Log hyperparam tuning results to a csv file for easy access, probably within paths.hyperparam_tuning_training_logs
@@ -22,7 +23,34 @@ class RunType(Enum):
     hyperparameter_tuning = 1
 
 
-def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, run_type: RunType, verbose=True):
+class FocalLoss(nn.Module):
+    """
+    - Down-weights the loss contribution from easy, well-classified pixels (background class) and concentrates gradient on hard pixels
+    - Counters pixel class imbalance; see original focal loss paper for gamma=2.0 default.
+    """
+    def __init__(self, gamma=2.0, weights=None):
+        super().__init__()
+        self.gamma = gamma
+        self.weights = weights # Optional per-class (256,) tensor of static weights based on prior class distributions, composable with focal weighting
+
+    def forward(self, pred, target): # Pred shape is (N, c, h, w), target is (N, h, w)
+        ce = F.cross_entropy(pred, target, weight=self.weights, reduction="none") # (N, h, w); each element has l = -w_t * log(p_t)
+        if self.weights is not None:
+            w_t = self.weights[target] # w_t is the weight of the corresponding label index
+            p_t = torch.exp(-ce / w_t) # p_t is prob of correct class
+        else: 
+            p_t = torch.exp(-ce)
+        return ((1 - p_t) ** self.gamma * ce).mean()
+
+
+def _freeze_batchnorm(model):
+    # Keeps pretrained BatchNorm running stats fixed
+    for module in model.modules():
+        if isinstance(module, nn.BatchNorm2d):
+            module.eval()
+
+
+def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1):
     
     def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.001, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
         """
@@ -71,17 +99,19 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
     valid_data = TrackNetDataset(DatasetType.valid)
     test_data = TrackNetDataset(DatasetType.test)
 
+    eval_batch_size = eval_batch_size if eval_batch_size is not None else batch_size # eval/test don't need gradients, so they can safely use a larger batch than training within the same memory budget
+
     running_on_cpu = (device.type == "cpu") # Pin memory if a gpu is present; this prevents allocated tensors from being moved to disk, speeding up how fast the tensors can be forwarded to the gpu
     train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, pin_memory=(not running_on_cpu))
-    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, shuffle=False, pin_memory=(not running_on_cpu))
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, shuffle=False, pin_memory=(not running_on_cpu))
+    valid_dataloader = DataLoader(valid_data, batch_size=eval_batch_size, shuffle=False, pin_memory=(not running_on_cpu))
+    test_dataloader = DataLoader(test_data, batch_size=eval_batch_size, shuffle=False, pin_memory=(not running_on_cpu))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    loss_fn = nn.CrossEntropyLoss()
+    loss_fn = FocalLoss(gamma=2.0)
 
-    best_model_metrics = [] # list of tuples of (precision, mean_dist_error, recall); precision is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
+    best_model_metrics = [] # List of tuples of (precision, mean_dist_error, recall); precision is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
     for epoch in range(1, max_epochs + 1):
-        train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, verbose=verbose)
+        train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, verbose=verbose, accumulation_steps=accumulation_steps)
         valid_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) # Graph shows loss for both train & valid set (used to check for overfitting/underfitting)
@@ -93,7 +123,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
 
         if epoch <= checkpoints:
             best_model_metrics.append((precision, mde, recall, epoch))
-            torch.save(model.state_dict(), os.path.join(checkpoints_folder, f"epoch_{epoch}"))
+            torch.save(model.state_dict(), os.path.join(checkpoints_folder, f"epoch_{epoch}.pt"))
         else:
             worst_idx = 0
             for i in range(1, len(best_model_metrics)):
@@ -104,20 +134,21 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
             if new_model_better:
                 # Delete worst checkpoint
                 deleted_model_metrics = best_model_metrics.pop(worst_idx)
-                model_to_delete = os.path.join(checkpoints_folder, f"epoch_{deleted_model_metrics[3]}")
+                model_to_delete = os.path.join(checkpoints_folder, f"epoch_{deleted_model_metrics[3]}.pt")
                 os.remove(model_to_delete)
                 # Insert new checkpoint
                 best_model_metrics.append((precision, mde, recall, epoch))
-                torch.save(model.state_dict(), os.path.join(checkpoints_folder, f"epoch_{epoch}"))
+                torch.save(model.state_dict(), os.path.join(checkpoints_folder, f"epoch_{epoch}.pt"))
     
     best_idx = 0
     for i in range(1, len(best_model_metrics)):
         if _compare_model_performance(checkpoint_model=best_model_metrics[best_idx], new_model=best_model_metrics[i]): # If true, worst_idx doesn't refer to worst model checkpoint
             best_idx = i
-    best_model_path = os.path.join(checkpoints_folder, f"epoch_{best_model_metrics[best_idx][3]}")
+    best_model_path = os.path.join(checkpoints_folder, f"epoch_{best_model_metrics[best_idx][3]}.pt")
     model_state = torch.load(best_model_path, weights_only=True, map_location=device)
     model.load_state_dict(model_state) # Load the best model
-    torch.save(model.state_dict(), os.path.join(model_save_folder, name)) # Eg name.pt within final save models/name/
+    model_save_name = name + ".pt"
+    torch.save(model.state_dict(), os.path.join(model_save_folder, model_save_name)) # Eg name.pt within final save models/name/
     if run_type == RunType.final_model_training:
         test_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
@@ -185,29 +216,37 @@ def compute_eval_metrics(tp, tn, fp, fn, dist_error_sum):
 
 
 
-def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, verbose):
+def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, verbose, accumulation_steps=1):
     model.train()
+    _freeze_batchnorm(model) # Must be applied after every call to model.train()
+    print(f"Starting epoch {epoch}...")
     total_loss = 0
-    for idx, batch in enumerate(train_loader): # batch is (inputs, outputs)
+    num_batches = len(train_loader)
+    optimizer.zero_grad()
+    for idx, batch in enumerate(train_loader): # Batch is (inputs, outputs)
         inputs = batch[0].to(device)
         outputs = batch[1].to(device)
-        optimizer.zero_grad()
         pred = model(inputs)
         loss = loss_fn(pred, outputs)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
+        loss = loss / accumulation_steps # Divide so accumulated gradients average over the effective batch, not sum
+        loss.backward() # Accumulates gradients if zero grad isn't called
+        is_last_batch = (idx == num_batches - 1)
+        if (idx + 1) % accumulation_steps == 0 or is_last_batch: # Flush on the last batch too, so a trailing partial group still gets applied
+            optimizer.step()
+            optimizer.zero_grad()
+        total_loss += loss.item() * accumulation_steps # True, unscaled loss for logging
         if verbose:
-            print(f"Avg loss for batch {idx + 1}: {loss.item():.4f}")
+            print(f"Epoch {epoch}; avg loss for batch {idx + 1}: {loss.item():.8f}")
     avg_loss = total_loss/len(train_loader)
     if verbose:
-        print(f"Avg loss for epoch {epoch}: {avg_loss:.4f}") # epoch is indexed from 1
+        print(f"Avg loss for epoch {epoch}: {avg_loss:.8f}") # Epoch is indexed from 1
         print("------------------------------------------------")
     return avg_loss
     
 
 def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
     model.eval()
+    print("Starting Evaluation...")
     with torch.inference_mode():
         total_loss = 0
         tp_tot = 0
@@ -228,18 +267,18 @@ def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
             fn_tot += fn
             error_tot += error
             if verbose:
-                print(f"Avg loss for batch {idx + 1}: {loss.item():.4f}")
+                print(f"Avg loss for batch {idx + 1}: {loss.item():.8f}")
         avg_loss = total_loss/len(data_loader)
         precision, mde, recall = compute_eval_metrics(tp_tot, tn_tot, fp_tot, fn_tot, error_tot)
-        mde_str = f"{mde:.4f}" if mde is not None else "N/A"
+        mde_str = f"{mde:.8f}" if mde is not None else "N/A"
         if verbose:
             if valid:
                 name = "validation"
             else:
                 name = "test"
-            print(f"Avg {name} loss: {avg_loss:.4f}")
-            print(f"{name} precision: {precision:.4f}")
+            print(f"Avg {name} loss: {avg_loss:.8f}")
+            print(f"{name} precision: {precision:.8f}")
             print(f"Avg {name} dist error: {mde_str}")
-            print(f"{name} recall: {recall:.4f}")
+            print(f"{name} recall: {recall:.8f}")
         
         return avg_loss, tp_tot, tn_tot, fp_tot, fn_tot, error_tot

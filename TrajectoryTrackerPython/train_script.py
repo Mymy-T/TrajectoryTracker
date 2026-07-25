@@ -16,7 +16,7 @@ model.load_state_dict(pretrained_state)
 model.to(device)
 name = sys.argv[1]
 # NOTE: Test run; hparams aren't tuned yet, dataset isn't complete
-test_loss, precision, mde, recall = train_and_evaluate_model(model=model, lr=1e-5, batch_size=32, checkpoints=5, max_epochs=10, name=name, run_type=RunType.final_model_training, verbose=True)
+test_loss, precision, mde, recall = train_and_evaluate_model(model=model, lr=1e-5, batch_size=4, eval_batch_size=8, accumulation_steps=8, checkpoints=5, max_epochs=10, name=name, run_type=RunType.final_model_training, verbose=True)
 mde_str = f"{mde:.4f}" if mde is not None else "N/A"
 print(f"Training completed successfully! Final stats:")
 print(f"Test Loss: {test_loss:.4f}")
