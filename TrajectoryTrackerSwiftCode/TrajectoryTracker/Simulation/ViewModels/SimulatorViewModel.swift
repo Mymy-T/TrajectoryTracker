@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import RealityKit
 import simd
 
 enum SpinInputMode: String, CaseIterable, Identifiable {
@@ -17,21 +18,24 @@ enum SpinInputMode: String, CaseIterable, Identifiable {
 
 @Observable
 final class SimulatorViewModel {
-    var launchPosition = SIMD3<Double>(0, 1, 0)
+    var launchPosition = SIMD3<Double>(Double(-CourtEntity.courtLength / 2), 1.5, 0) // Only takes into affect after starting simulation
     var speed: Double = 20 // m/s
     var launchAngleDegrees: Double = 15
     var azimuthDegrees: Double = 0
-
+    
     var spinInputMode: SpinInputMode = .simple
     var spinType: SpinType = .flat
     var spinRPM: Double = 0
-    var spinAxis = SIMD3<Double>(0, 0, 1)
+    var spinAxis = SIMD3<Double>(0, 0, 1) // Defaults to topspin or backspin
 
     private(set) var trajectory: [TrajectoryPoint] = []
     var playbackTime: TimeInterval = 0
     var isPlaying: Bool = false
+    
+    var cameraControlMode: CameraControls = .pan
 
     private let simulator = TrajectorySimulator()
+    
 
     var initialConditions: InitialConditions {
         let spin: SpinInput = (spinInputMode == .simple) ? .simple(type: spinType, rpm: spinRPM) : .vector(axis: spinAxis, rpm: spinRPM)

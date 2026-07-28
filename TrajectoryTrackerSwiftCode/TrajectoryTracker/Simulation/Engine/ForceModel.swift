@@ -14,10 +14,16 @@ protocol ForceModel {
     func netAcceleration(for state: BallState, ball: BallProperties) -> SIMD3<Double>
 }
 
-/// Placeholder used until real physics is implemented. Produces zero acceleration, so a
-/// `TrajectorySimulator` using this model traces a straight, constant-velocity path.
+/// Model where no force act upon the ball; travels in a straight line
 struct ZeroForceModel: ForceModel {
     func netAcceleration(for state: BallState, ball: BallProperties) -> SIMD3<Double> {
-        .zero
+        return .zero
+    }
+}
+
+/// Model where the only force acting on the ball is gravity; ball travels in a parabola
+struct GravityForceModel: ForceModel {
+    func netAcceleration(for state: BallState, ball: BallProperties) -> SIMD3<Double> {
+        return SIMD3<Double>(0, -9.8, 0)
     }
 }

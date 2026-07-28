@@ -14,6 +14,7 @@ struct SimulatorView: View {
     var body: some View {
         VStack(spacing: 0) {
             TrajectoryRealityView(viewModel: viewModel)
+            //CameraButtonsView(viewModel: viewModel)
             PlaybackControlsView(viewModel: viewModel)
         }
         .toolbar {

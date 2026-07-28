@@ -8,9 +8,7 @@
 import Foundation
 import simd
 
-/// Coordinate convention used throughout the simulation: SIMD3<Double>, meters,
-/// x = downcourt distance, y = height (up), z = lateral offset. This matches RealityKit's
-/// y-up convention directly, so rendering only needs a per-axis Double -> Float cast.
+/// Coordinate convention used throughout the simulation: SIMD3<Double>, meters, x = downcourt distance, y = height (up), z = lateral offset.
 struct BallState {
     var time: TimeInterval
     var position: SIMD3<Double>

@@ -10,7 +10,7 @@ import simd
 
 /// User-specified launch parameters for a simulated shot.
 struct InitialConditions {
-    var launchPosition: SIMD3<Double>
+    var launchPosition: SIMD3<Double> // Origin is at the center of the court, with +x in direction from left baseline towards net (imagine a top down view of the court, where the longer side is the horizontal side), +y direction is upwards, +z direction is downwards
     var speed: Double // m/s
     var launchAngleDegrees: Double // vertical angle above horizontal
     var azimuthDegrees: Double // 0 when facing net; angle from the normal (of the baseline) is measured, positive if going towards the right
