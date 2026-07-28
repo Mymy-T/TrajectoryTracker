@@ -37,10 +37,20 @@ enum SpinInput {
     /// Normalizes either input mode into a single angular-velocity vector (rad/s) for the engine to consume.
     var angularVelocity: SIMD3<Double> {
         switch self {
-        case .simple:
-            // TODO: map each SpinType to a rotation axis (relative to travel direction) once the
-            // Magnus-force model is implemented. Left at zero for now — this is UI/engine plumbing only.
-            return .zero
+        case .simple(let type, let rpm):
+            let angularSpeed = rpm * 2 * .pi / 60 // rad/s
+            switch type {
+            case .flat:
+                return .zero
+            case .topspin:
+                return angularSpeed*SIMD3<Double>(0, 0, -1)
+            case .backspin:
+                return angularSpeed*SIMD3<Double>(0, 0, 1)
+            case .sidespinLeft:
+                return angularSpeed*SIMD3<Double>(0, 1, 0)
+            case .sidespinRight:
+                return angularSpeed*SIMD3<Double>(0, -1, 0)
+            }
         case .vector(let axis, let rpm):
             let normalizedAxis = simd_length(axis) > 0 ? simd_normalize(axis) : .zero
             let radiansPerSecond = rpm * 2 * .pi / 60

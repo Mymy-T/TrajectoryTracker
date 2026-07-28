@@ -10,7 +10,7 @@ import simd
 
 /// Numerically integrates a ball's motion forward in time under a `ForceModel`. Currently uses Euler method
 struct TrajectorySimulator {
-    var forceModel: ForceModel = GravityForceModel()
+    var forceModel: ForceModel = MagnusDragGravityForceModel()
     var timeStep: TimeInterval = 1.0 / 120
     var maxDuration: TimeInterval = 5.0
 

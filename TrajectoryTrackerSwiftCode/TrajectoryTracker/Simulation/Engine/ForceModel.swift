@@ -8,8 +8,7 @@
 import Foundation
 import simd
 
-/// Computes net acceleration on the ball at a given state. This is the seam where gravity, drag,
-/// and Magnus (spin) forces will be implemented — nothing else in the app needs to change when they are.
+/// Computes net acceleration on the ball at a given state.
 protocol ForceModel {
     func netAcceleration(for state: BallState, ball: BallProperties) -> SIMD3<Double>
 }
@@ -25,5 +24,14 @@ struct ZeroForceModel: ForceModel {
 struct GravityForceModel: ForceModel {
     func netAcceleration(for state: BallState, ball: BallProperties) -> SIMD3<Double> {
         return SIMD3<Double>(0, -9.8, 0)
+    }
+}
+
+struct MagnusDragGravityForceModel: ForceModel {
+    func netAcceleration(for state: BallState, ball: BallProperties) -> SIMD3<Double> {
+        let dragAcceleration: SIMD3<Double> = -ball.cd * simd_length(state.velocity) * state.velocity
+        let magnusAcceleration: SIMD3<Double> = ball.cm * cross(state.angularVelocity, state.velocity)
+        let gravitationalAcceleration = SIMD3<Double>(0, -9.8, 0)
+        return gravitationalAcceleration + dragAcceleration + magnusAcceleration
     }
 }

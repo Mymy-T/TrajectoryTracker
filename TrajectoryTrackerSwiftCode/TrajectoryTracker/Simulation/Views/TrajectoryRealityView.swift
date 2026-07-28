@@ -30,7 +30,7 @@ struct TrajectoryRealityView: View {
     @State private var pivotRotation = simd_quatf(angle: -Float.pi / 2, axis: SIMD3<Float>(0, 1, 0))
     @State private var yaw: Float = -Float.pi / 2   // Left/Right rotation
     @State private var pitch: Float = 0 // Up/Down rotation
-    @State private var zoomDistance: Float = 5.0
+    @State private var zoomDistance: Float = 5.0 // +z direction -> camera moves back, -z direction -> camera moves forward (since camera points in -z direction by default)
     @State private var savedZoomDistance: Float = 5.0
     
     @State private var baseEntity: Entity? // Responsible for translational motion; its axes always remain aligned with world coordinate system
@@ -110,7 +110,7 @@ struct TrajectoryRealityView: View {
         if cameraMode == .zoom {
             let gesture = MagnifyGesture()
                 .onChanged { value in
-                    let newDistance = savedZoomDistance / Float(value.magnification) // Invert scale since larger finger pinch camera should come closer
+                    let newDistance = savedZoomDistance / Float(value.magnification) // Invert scale since larger finger pinch means that camera should come closer (move in -z direction)
                     zoomDistance = max(1.5, min(newDistance, 20.0)) // Clamp the distance so user can't zoom inside the floor or fly too far away
                 }
                 .onEnded { _ in
