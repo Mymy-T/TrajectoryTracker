@@ -1,14 +1,10 @@
-# from asyncio import WriteTransport
-# import glob
-# from tabnanny import check
 from dataset import TrackNetDataset, DatasetType
 from enum import Enum
 import math
 import os
 from paths import ProjectPaths
-# from statistics import NormalDist
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import torch.nn.functional as F
@@ -50,7 +46,8 @@ def _freeze_batchnorm(model):
             module.eval()
 
 
-def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1):
+# NOTE: Saves resume_checkpoint every batch_size batches, and on every last batch of epoch
+def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, resuming, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1):
     
     def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.001, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
         """
@@ -83,17 +80,26 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
 
     if not os.path.exists(log_path):
         os.mkdir(log_path)
-        writer = SummaryWriter(log_dir=log_path)
     else:
-        raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, or rename this run.")
+        if not resuming:
+            raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, or rename this run.")
+        else:
+            print(f"Resuming a previous run ({name})...")
+    writer = SummaryWriter(log_dir=log_path)
 
+    checkpoints_folder = os.path.join(model_save_folder, "checkpoints")
     if not os.path.exists(model_save_folder):
-        # base path is final_models/name; inside, there is a "checkpoints" folder to save all model checkpoints, and a model save file for the best model from the "checkpoints" folder
+        # Base path is final_models/name; inside, there is a "checkpoints" folder to save all model checkpoints, and a model save file for the best model from the "checkpoints" folder
         os.mkdir(model_save_folder)
-        checkpoints_folder = os.path.join(model_save_folder, "checkpoints")
         os.mkdir(checkpoints_folder)
     else:
-        raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the models from the previous run, or rename this run.")
+        if not resuming:
+            raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the models from the previous run, or rename this run.")
+        else:
+            print(f"Resuming a previous run ({name})...")
+    
+    resume_checkpoint_path = os.path.join(model_save_folder, "resume_checkpoint.pt") # Saved inside final_models/name
+
 
     train_data = TrackNetDataset(DatasetType.train)
     valid_data = TrackNetDataset(DatasetType.valid)
@@ -101,19 +107,52 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
 
     eval_batch_size = eval_batch_size if eval_batch_size is not None else batch_size # eval/test don't need gradients, so they can safely use a larger batch than training within the same memory budget
 
+    data_generator = torch.Generator() # Custom generator allows for saving train dataloader state
+    sampler = RandomSampler(train_data, generator=data_generator)
+
     running_on_cpu = (device.type == "cpu") # Pin memory if a gpu is present; this prevents allocated tensors from being moved to disk, speeding up how fast the tensors can be forwarded to the gpu
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, shuffle=True, pin_memory=(not running_on_cpu))
-    valid_dataloader = DataLoader(valid_data, batch_size=eval_batch_size, shuffle=False, pin_memory=(not running_on_cpu))
-    test_dataloader = DataLoader(test_data, batch_size=eval_batch_size, shuffle=False, pin_memory=(not running_on_cpu))
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, sampler=sampler, pin_memory=(not running_on_cpu)) # Use custom sampler
+    valid_dataloader = DataLoader(valid_data, batch_size=eval_batch_size, pin_memory=(not running_on_cpu))
+    test_dataloader = DataLoader(test_data, batch_size=eval_batch_size, pin_memory=(not running_on_cpu))
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = FocalLoss(gamma=2.0)
 
+    start_epoch = 1
     best_model_metrics = [] # List of tuples of (precision, mean_dist_error, recall); precision is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
-    for epoch in range(1, max_epochs + 1):
-        train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, verbose=verbose, accumulation_steps=accumulation_steps)
+
+    # Only used in _train_epoch
+    resume_batch_idx = 0
+    total_batch_loss = 0
+
+    if resuming:
+        if os.path.exists(resume_checkpoint_path):
+            resume_checkpoint = torch.load(resume_checkpoint_path, map_location=device)
+
+            model.load_state_dict(resume_checkpoint["model_state_dict"])
+            optimizer.load_state_dict(resume_checkpoint["optimizer_state_dict"])
+            best_model_metrics = resume_checkpoint["best_model_metrics"]
+            start_epoch = resume_checkpoint["epoch"]
+
+            resume_batch_idx = resume_checkpoint["resume_batch_idx"] # idx of batch training will start on
+            total_batch_loss = resume_checkpoint["total_batch_loss"]
+            print(f"Resuming training from epoch {start_epoch}, starting with batch {resume_batch_idx}")
+        else:
+            raise FileNotFoundError(f"There is no existing resume_checkpoint.pt file. Ensure it is named correctly and at the correct path ({resume_checkpoint_path}) or run train_script.py with the resuming arg set to false.")
+
+
+    for epoch in range(start_epoch, max_epochs + 1):
+        data_generator.manual_seed(0 + epoch)
+
+        train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, resume_batch_idx=resume_batch_idx, total_loss=total_batch_loss, resume_checkpoint_path=resume_checkpoint_path, verbose=verbose, accumulation_steps=accumulation_steps, best_model_metrics=best_model_metrics)
+
+        # Reset back to initial state, resuming has been completed; everything should run normally again
+        resume_batch_idx = 0
+        total_batch_loss = 0
+
         valid_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
+
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) # Graph shows loss for both train & valid set (used to check for overfitting/underfitting)
         eval_metrics = {"Precision": precision, "Recall": recall}
         if mde is not None:
@@ -145,13 +184,17 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         if _compare_model_performance(checkpoint_model=best_model_metrics[best_idx], new_model=best_model_metrics[i]): # If true, worst_idx doesn't refer to worst model checkpoint
             best_idx = i
     best_model_path = os.path.join(checkpoints_folder, f"epoch_{best_model_metrics[best_idx][3]}.pt")
+
+    # Load the best model and save it for easy access
     model_state = torch.load(best_model_path, weights_only=True, map_location=device)
-    model.load_state_dict(model_state) # Load the best model
+    model.load_state_dict(model_state)
     model_save_name = name + ".pt"
     torch.save(model.state_dict(), os.path.join(model_save_folder, model_save_name)) # Eg name.pt within final save models/name/
+
     if run_type == RunType.final_model_training:
         test_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
+
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Test": test_loss}, global_step=1)
         test_eval_metrics = {"TestPrecision": precision, "TestRecall": recall}
         if mde is not None:
@@ -159,13 +202,15 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=test_eval_metrics, global_step=1)
         writer.flush()
         writer.close()
+
+        os.remove(resume_checkpoint_path) # Remove resume_checkpoint.pt, everything has been completed for this run
         return test_loss, precision, mde, recall
     # else: # TODO: Hyperparm tuning (possibly)
     #     writer.close()
     #     return best_loss
 
 
-def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOTE center_diff_tolerance is in 360 by 640 space, not 1080 by 1920 space; measured in pixels
+def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOTE center_diff_tolerance is in 360 by 640 space, not 1080 by 1920 space; measured in pixels; 5 pixels also used in tracknet paper
     """
     In deployment, the model should ideally have a low prediction error for the center of the ball, when it is a true positive. It is fine if the model misses some balls, but not if it makes up ball data when there is none. Therefore, precision is used as the primary metric, with mean center error as the secondary metric. Recall is computed as a sanity check to prevent extremely low recall.
     returns tp, tn, fp, fn, mae
@@ -216,14 +261,14 @@ def compute_eval_metrics(tp, tn, fp, fn, dist_error_sum):
 
 
 
-def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, verbose, accumulation_steps=1):
+def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_idx, total_loss, resume_checkpoint_path, verbose, accumulation_steps, best_model_metrics): # best_model_metrics passed in for only purpose of saving to resume_checkpoint
     model.train()
     _freeze_batchnorm(model) # Must be applied after every call to model.train()
-    print(f"Starting epoch {epoch}...")
-    total_loss = 0
     num_batches = len(train_loader)
     optimizer.zero_grad()
     for idx, batch in enumerate(train_loader): # Batch is (inputs, outputs)
+        if idx < resume_batch_idx:
+            continue
         inputs = batch[0].to(device)
         outputs = batch[1].to(device)
         pred = model(inputs)
@@ -234,13 +279,26 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, verbose, accumu
         if (idx + 1) % accumulation_steps == 0 or is_last_batch: # Flush on the last batch too, so a trailing partial group still gets applied
             optimizer.step()
             optimizer.zero_grad()
+            resume_checkpoint = {
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "epoch": epoch,
+                "resume_batch_idx": idx + 1, # idx of the next batch, not the current completed batch
+                "total_batch_loss": total_loss, # For logging purposes
+                "best_model_metrics": best_model_metrics
+            }
+            torch.save(resume_checkpoint, resume_checkpoint_path)
         total_loss += loss.item() * accumulation_steps # True, unscaled loss for logging
+
         if verbose:
             print(f"Epoch {epoch}; avg loss for batch {idx + 1}: {loss.item():.8f}")
+
     avg_loss = total_loss/len(train_loader)
+
     if verbose:
         print(f"Avg loss for epoch {epoch}: {avg_loss:.8f}") # Epoch is indexed from 1
         print("------------------------------------------------")
+
     return avg_loss
     
 
