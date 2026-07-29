@@ -3,6 +3,7 @@ from enum import Enum
 import math
 import os
 from paths import ProjectPaths
+import time
 import torch
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
@@ -47,7 +48,7 @@ def _freeze_batchnorm(model):
 
 
 # NOTE: Saves resume_checkpoint every batch_size batches, and on every last batch of epoch
-def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, resuming, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1):
+def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, resuming, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1, max_train_seconds=None):
     
     def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.001, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
         """
@@ -141,14 +142,22 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
             raise FileNotFoundError(f"There is no existing resume_checkpoint.pt file. Ensure it is named correctly and at the correct path ({resume_checkpoint_path}) or run train_script.py with the resuming arg set to false.")
 
 
+    training_start_time = time.monotonic() # Timer for a single training session (not cumulative over the entire training process)
+
     for epoch in range(start_epoch, max_epochs + 1):
         data_generator.manual_seed(0 + epoch)
 
-        train_loss = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, resume_batch_idx=resume_batch_idx, total_loss=total_batch_loss, resume_checkpoint_path=resume_checkpoint_path, verbose=verbose, accumulation_steps=accumulation_steps, best_model_metrics=best_model_metrics)
+        train_loss, time_limit_reached = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, resume_batch_idx=resume_batch_idx, total_loss=total_batch_loss, resume_checkpoint_path=resume_checkpoint_path, verbose=verbose, accumulation_steps=accumulation_steps, best_model_metrics=best_model_metrics, max_train_seconds=max_train_seconds, training_start_time=training_start_time)
 
         # Reset back to initial state, resuming has been completed; everything should run normally again
         resume_batch_idx = 0
         total_batch_loss = 0
+
+        if time_limit_reached:
+            # Training is paused, not complete: skip validation, model selection, and finalization for this partial epoch; resume later using resume_checkpoint.pt
+            writer.flush()
+            writer.close()
+            return None
 
         valid_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
@@ -160,6 +169,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=eval_metrics, global_step=epoch) # Graph for validation set only; MDE omitted on steps with no true positives, rather than logging a spike
         writer.flush()
 
+        # Selection of the saved best checkpoint models (resume checkpoint untouched)
         if epoch <= checkpoints:
             best_model_metrics.append((precision, mde, recall, epoch))
             torch.save(model.state_dict(), os.path.join(checkpoints_folder, f"epoch_{epoch}.pt"))
@@ -181,7 +191,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
     
     best_idx = 0
     for i in range(1, len(best_model_metrics)):
-        if _compare_model_performance(checkpoint_model=best_model_metrics[best_idx], new_model=best_model_metrics[i]): # If true, worst_idx doesn't refer to worst model checkpoint
+        if _compare_model_performance(checkpoint_model=best_model_metrics[best_idx], new_model=best_model_metrics[i]): # If true, best_idx doesn't refer to best model checkpoint
             best_idx = i
     best_model_path = os.path.join(checkpoints_folder, f"epoch_{best_model_metrics[best_idx][3]}.pt")
 
@@ -253,6 +263,8 @@ def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOT
                 fn += 1
     return tp, tn, fp, fn, dist_error_sum
 
+
+
 def compute_eval_metrics(tp, tn, fp, fn, dist_error_sum):
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0.0
     mde = dist_error_sum / tp if tp > 0 else None
@@ -261,11 +273,12 @@ def compute_eval_metrics(tp, tn, fp, fn, dist_error_sum):
 
 
 
-def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_idx, total_loss, resume_checkpoint_path, verbose, accumulation_steps, best_model_metrics): # best_model_metrics passed in for only purpose of saving to resume_checkpoint
+def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_idx, total_loss, resume_checkpoint_path, verbose, accumulation_steps, best_model_metrics, max_train_seconds, training_start_time): # best_model_metrics passed in for only purpose of saving to resume_checkpoint
     model.train()
     _freeze_batchnorm(model) # Must be applied after every call to model.train()
     num_batches = len(train_loader)
     optimizer.zero_grad()
+    time_limit_reached = False
     for idx, batch in enumerate(train_loader): # Batch is (inputs, outputs)
         if idx < resume_batch_idx:
             continue
@@ -288,18 +301,24 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
                 "best_model_metrics": best_model_metrics
             }
             torch.save(resume_checkpoint, resume_checkpoint_path)
+            if max_train_seconds is not None and (time.monotonic() - training_start_time) >= max_train_seconds:
+                # Stop right at this resume checkpoint save boundary
+                print(f"Time budget of {max_train_seconds}s reached after finishing batch {idx + 1} of epoch {epoch}; pausing training. Resume later with resuming=True.")
+                time_limit_reached = True
+                break
         total_loss += loss.item() * accumulation_steps # True, unscaled loss for logging
 
         if verbose:
             print(f"Epoch {epoch}; avg loss for batch {idx + 1}: {loss.item():.8f}")
-
+    
     avg_loss = total_loss/len(train_loader)
 
-    if verbose:
-        print(f"Avg loss for epoch {epoch}: {avg_loss:.8f}") # Epoch is indexed from 1
-        print("------------------------------------------------")
+    if not time_limit_reached:
+        if verbose:
+            print(f"Avg loss for epoch {epoch}: {avg_loss:.8f}") # Epoch is indexed from 1
+            print("------------------------------------------------")
 
-    return avg_loss
+    return avg_loss, time_limit_reached # avg_loss unused if time_limit_reached
     
 
 def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
