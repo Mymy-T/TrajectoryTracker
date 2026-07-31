@@ -10,6 +10,7 @@ import Combine
 import CoreMotion
 import Foundation
 import SwiftUI
+import simd
 
 @Observable
 class DeviceOrientationMonitor {
@@ -50,6 +51,8 @@ struct CameraUI: View {
     @State private var recording: Bool = false
     @State private var reviewMode: Bool = false
     @State private var deviceOrientationMonitor = DeviceOrientationMonitor()
+    @State private var intrinsicMatrix: matrix_float3x3?
+    @State private var intrinsicFormatDimensions: CMVideoDimensions?
     
     @Binding var showCamera: Bool
     @Binding var showAccessError: Bool
@@ -109,15 +112,17 @@ struct CameraUI: View {
             cameraControls()
             
         }.fullScreenCover(isPresented: $reviewMode) {
-            ReviewVideoView(path: videoPath, showCamera: $showCamera, reviewMode: $reviewMode)
+            ReviewVideoView(path: videoPath, intrinsicMatrix: intrinsicMatrix, intrinsicFormatDimensions: intrinsicFormatDimensions, showCamera: $showCamera, reviewMode: $reviewMode)
         }
         .onDisappear {
             camera.session.stopRunning()
             deviceOrientationMonitor.stopMonitoring()
         }
         .onAppear {
-            camera.onRecordingFinished = { filepath in
-                self.videoPath = filepath
+            camera.onRecordingFinished = { filepath, intrinsics, formatDimensions in
+                self.videoPath = filepath // Temporary path
+                self.intrinsicMatrix = intrinsics
+                self.intrinsicFormatDimensions = formatDimensions
                 self.reviewMode = true
             }
             deviceOrientationMonitor.startMonitoring()
