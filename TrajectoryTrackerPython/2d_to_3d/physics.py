@@ -89,11 +89,12 @@ if __name__ == "__main__":
     w = court_properties.court_width
     x_i = np.array([-l/2, 1, 0]).astype(float)
     v_i = np.array([30, 7, 0]).astype(float)
-    spin_i = np.array([0, -300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s right sidespin; exaggerated to show spin effects
+    spin_i = np.array([0, -300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s left sidespin; exaggerated to show spin effects
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
     simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=0.001)
     trajectory, end_time = simulation.compute_3d_trajectory()
-    print(len(trajectory))
+
+    print(f"Num points in trajectory: {len(trajectory)}")
 
     t = np.linspace(0, end_time, int(10/0.001))
     x = []
@@ -112,13 +113,16 @@ if __name__ == "__main__":
     # Highlight start and end points
     ax.scatter(x[0], z[0], y[0], color='green', s=50, label='Start')
     ax.scatter(x[-1], z[-1], y[-1], color='red', s=50, label='End')
+
     ax.set_xlim([-l/2, l/2])    
     ax.set_ylim([-w/2, w/2])
     ax.set_zlim([0, 4]) 
     ax.set_box_aspect([l, w, 4])
+
+    # NOTE: In matplotlib, +z is up; in the coordinates of the trajectory, +y is up
     ax.set_xlabel('X Axis')
-    ax.set_ylabel('Y Axis')
-    ax.set_zlabel('Z Axis')
+    ax.set_ylabel('Z Axis')
+    ax.set_zlabel('Y Axis')
     ax.set_title('3D Path Trajectory')
     ax.legend()
 
