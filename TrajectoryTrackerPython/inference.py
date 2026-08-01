@@ -37,11 +37,11 @@ def main():
     if not os.path.exists(frames_folder):
         os.mkdir(frames_folder)
 
-    if sys.argv[2] == "False":
+    if sys.argv[2].lower() == "false":
         original_video_filename = f"{sys.argv[3]}.mp4"
         extract_clip_frames(video_path=os.path.join(paths.videos_folder, original_video_filename), output_dir=frames_folder)
         print("Frames extracted")
-    elif sys.argv[2] == "True":
+    elif sys.argv[2].lower() == "true":
         pass
     else:
         print("arg <preexisting_video> must be either 'True' or 'False'")
@@ -53,9 +53,12 @@ def main():
 
 def load_model(model_name):
     paths = ProjectPaths()
-    if not model_name.endswith(".pt"):
-        model_name = model_name + ".pt"
-    model_path = os.path.join(paths.final_model_save_folder, model_name)
+    model_name, extension = os.path.splitext(model_name)
+    folder_name = model_name
+    if extension == "":
+        extension = ".pt"
+    model_name_with_extension = model_name + extension
+    model_path = os.path.join(paths.final_model_save_folder, folder_name,  model_name_with_extension)
     model = TrackNet()
     model_state = torch.load(model_path, weights_only=True, map_location=torch.device(device))
     model.load_state_dict(model_state)

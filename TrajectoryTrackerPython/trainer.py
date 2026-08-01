@@ -50,7 +50,7 @@ def _freeze_batchnorm(model):
 # NOTE: Saves resume_checkpoint every batch_size batches, and on every last batch of epoch
 def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, name, resuming, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1, max_train_seconds=None):
     
-    def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.001, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
+    def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.01, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
         """
         checkpoint_model, new_model - tuples of (precision, mde, recall, epoch)
         returns True is new model is better, False otherwise
@@ -83,7 +83,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         os.mkdir(log_path)
     else:
         if not resuming:
-            raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, or rename this run.")
+            raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, rename this run, or set <resuming> to true.")
         else:
             print(f"Resuming a previous run ({name})...")
     writer = SummaryWriter(log_dir=log_path)
@@ -95,7 +95,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         os.mkdir(checkpoints_folder)
     else:
         if not resuming:
-            raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the models from the previous run, or rename this run.")
+            raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the previous run, rename this run, or set <resuming> to true.")
         else:
             print(f"Resuming a previous run ({name})...")
     
@@ -137,7 +137,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
 
             resume_batch_idx = resume_checkpoint["resume_batch_idx"] # idx of batch training will start on
             total_batch_loss = resume_checkpoint["total_batch_loss"]
-            print(f"Resuming training from epoch {start_epoch}, starting with batch {resume_batch_idx}")
+            print(f"Resuming training from epoch {start_epoch}, starting with batch {resume_batch_idx + 1}") # add one since batch idx is 0 indexed
         else:
             raise FileNotFoundError(f"There is no existing resume_checkpoint.pt file. Ensure it is named correctly and at the correct path ({resume_checkpoint_path}) or run train_script.py with the resuming arg set to false.")
 
@@ -159,7 +159,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
             writer.close()
             return None
 
-        valid_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
+        valid_loss, tp, tn, fp, fn, te = evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
 
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) # Graph shows loss for both train & valid set (used to check for overfitting/underfitting)
@@ -202,7 +202,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
     torch.save(model.state_dict(), os.path.join(model_save_folder, model_save_name)) # Eg name.pt within final save models/name/
 
     if run_type == RunType.final_model_training:
-        test_loss, tp, tn, fp, fn, te = _evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
+        test_loss, tp, tn, fp, fn, te = evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
 
         writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Test": test_loss}, global_step=1)
@@ -305,11 +305,14 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
                 # Stop right at this resume checkpoint save boundary
                 print(f"Time budget of {max_train_seconds}s reached after finishing batch {idx + 1} of epoch {epoch}; pausing training. Resume later with resuming=True.")
                 time_limit_reached = True
-                break
+                
         total_loss += loss.item() * accumulation_steps # True, unscaled loss for logging
 
         if verbose:
             print(f"Epoch {epoch}; avg loss for batch {idx + 1}: {loss.item():.8f}")
+        
+        if time_limit_reached:
+            break
     
     avg_loss = total_loss/len(train_loader)
 
@@ -321,7 +324,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     return avg_loss, time_limit_reached # avg_loss unused if time_limit_reached
     
 
-def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
+def evaluate(model, loss_fn, data_loader, valid, verbose=True):
     model.eval()
     print("Starting Evaluation...")
     with torch.inference_mode():
@@ -354,6 +357,7 @@ def _evaluate(model, loss_fn, data_loader, valid, verbose=True):
             else:
                 name = "test"
             print(f"Avg {name} loss: {avg_loss:.8f}")
+            print(f"TP: {tp_tot} \t TN: {tn_tot} \t FP: {fp_tot} \t FN: {fn_tot}")
             print(f"{name} precision: {precision:.8f}")
             print(f"Avg {name} dist error: {mde_str}")
             print(f"{name} recall: {recall:.8f}")
