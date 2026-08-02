@@ -1,42 +1,7 @@
 import copy
-from dataclasses import dataclass
+from data_models import BallState, BallProperties, CourtProperties
 import matplotlib.pyplot as plt
 import numpy as np
-
-@dataclass
-class BallProperties:
-    """
-    - mass is measured in kg
-    - radius is measured in m
-    - cd is measured in m^-1
-    - cm is measured in rad^-1
-    """
-    mass: float = 0.057
-    radius: float = 0.033
-    cd: float = 0.02
-    cm: float = 1.2e-3
-
-@dataclass
-class CourtProperties:
-    """
-    - court_length is measured in m
-    - court_width is measured in m
-    """
-    court_length: float = 23.77
-    court_width: float = 10.97
-
-@dataclass
-class BallState:
-    """
-    Coordinate frame convention: +x is along the court length, +y is upward, +z is along court width; origin is at center of court
-    - position is a vector of length 3, measured in m
-    - velocity is a vector of length 3, measured in m/s
-    - spin is a vector of length 3, measured in rad/s
-    """
-    position: np.ndarray
-    velocity: np.ndarray
-    spin: np.ndarray
-
 
 class PhysicsSimulation():
     """
@@ -83,20 +48,25 @@ class PhysicsSimulation():
         state.velocity += a * t
 
 
-if __name__ == "__main__":
+def generate_sample_trajectory():
+    court_properties = CourtProperties()
+    l = court_properties.court_length
+    x_i = np.array([-l/2, 1, 0]).astype(float)
+    v_i = np.array([30, 7, 0]).astype(float)
+    spin_i = np.array([0, -300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s right sidespin; exaggerated to show spin effects
+    ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
+    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=0.001)
+    return simulation.compute_3d_trajectory()
+
+
+def plot_3d_trajectory(trajectory):
     court_properties = CourtProperties()
     l = court_properties.court_length
     w = court_properties.court_width
-    x_i = np.array([-l/2, 1, 0]).astype(float)
-    v_i = np.array([30, 7, 0]).astype(float)
-    spin_i = np.array([0, -300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s left sidespin; exaggerated to show spin effects
-    ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
-    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=0.001)
-    trajectory, end_time = simulation.compute_3d_trajectory()
+    sw = court_properties.singles_width
+    sld = court_properties.service_line_dist_from_net
 
-    print(f"Num points in trajectory: {len(trajectory)}")
-
-    t = np.linspace(0, end_time, int(10/0.001))
+    # t = np.linspace(0, end_time, int(10/0.001))
     x = []
     y = []
     z = []
@@ -108,14 +78,76 @@ if __name__ == "__main__":
     # Plotting
     fig = plt.figure(figsize=(8, 6))
     ax = fig.add_subplot(111, projection='3d')
+
+
+    # Outer court lines
+    ax.plot(
+        [-l/2, l/2, l/2, -l/2, -l/2],
+        [-w/2, -w/2, w/2, w/2, -w/2],
+        [0, 0, 0, 0, 0],
+        color="red",
+        linewidth=1,
+        label="Court Lines"
+    )
+
+    # Singles lines
+    ax.plot(
+        [-l/2, l/2],
+        [-sw/2, -sw/2],
+        [0, 0],
+        color="red",
+        linewidth=1,
+        label="Court Lines"
+    )
+
+    ax.plot(
+        [-l/2, l/2],
+        [sw/2, sw/2],
+        [0, 0],
+        color="red",
+        linewidth=1,
+        label="Court Lines"
+    )
+
+    # Net line (across X = 0)
+    ax.plot([0, 0], [-w/2, w/2], [0, 0], color="red", linewidth=1.5)
+
+    # Service lines
+    ax.plot(
+        [-sld, -sld],
+        [-w/2, w/2],
+        [0, 0],
+        color="red",
+        linewidth=1,
+    )
+    ax.plot(
+        [sld, sld],
+        [-w/2, w/2],
+        [0, 0],
+        color="red",
+        linewidth=1,
+    )
+
+    # Center Service Line (Connects the two service lines down the middle at Z = 0)
+    ax.plot(
+        [-sld, sld],
+        [0, 0],
+        [0, 0],
+        color="red",
+        linewidth=1,
+    )
+
+
+    # Plot trajectory
     ax.plot(x, z, y, label='3D Trajectory', color='b', linewidth=2)
 
     # Highlight start and end points
     ax.scatter(x[0], z[0], y[0], color='green', s=50, label='Start')
     ax.scatter(x[-1], z[-1], y[-1], color='red', s=50, label='End')
 
-    ax.set_xlim([-l/2, l/2])    
-    ax.set_ylim([-w/2, w/2])
+    ax.set_xlim([-l/2 - 1, l/2 + 1])    
+    ax.set_ylim([-w/2 - 1, w/2 + 1])
+    ax.invert_yaxis() # This way negative values of z axis are towards the left
     ax.set_zlim([0, 4]) 
     ax.set_box_aspect([l, w, 4])
 
@@ -127,4 +159,11 @@ if __name__ == "__main__":
     ax.legend()
 
     plt.show()
+
+if __name__ == "__main__":
+    trajectory, end_time = generate_sample_trajectory()
+
+    print(f"Num points in trajectory: {len(trajectory)}")
+
+    plot_3d_trajectory(trajectory)
 
