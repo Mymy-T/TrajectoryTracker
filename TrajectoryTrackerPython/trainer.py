@@ -41,7 +41,6 @@ class FocalLoss(nn.Module):
 
 
 def _freeze_batchnorm(model):
-    # Keeps pretrained BatchNorm running stats fixed
     for module in model.modules():
         if isinstance(module, nn.BatchNorm2d):
             module.eval()
@@ -169,7 +168,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
         writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=eval_metrics, global_step=epoch) # Graph for validation set only; MDE omitted on steps with no true positives, rather than logging a spike
         writer.flush()
 
-        # Selection of the saved best checkpoint models (resume checkpoint untouched)
+        # Selection of the saved best checkpoint models
         if epoch <= checkpoints:
             best_model_metrics.append((precision, mde, recall, epoch))
             torch.save(model.state_dict(), os.path.join(checkpoints_folder, f"epoch_{epoch}.pt"))
@@ -222,7 +221,7 @@ def train_and_evaluate_model(model, lr, batch_size, checkpoints, max_epochs, nam
 
 def _obtain_batch_eval_stats(model, pred, label, center_diff_tolerance=5): # NOTE center_diff_tolerance is in 360 by 640 space, not 1080 by 1920 space; measured in pixels; 5 pixels also used in tracknet paper
     """
-    In deployment, the model should ideally have a low prediction error for the center of the ball, when it is a true positive. It is fine if the model misses some balls, but not if it makes up ball data when there is none. Therefore, precision is used as the primary metric, with mean center error as the secondary metric. Recall is computed as a sanity check to prevent extremely low recall.
+    Model should ideally have a low prediction error for the center of the ball, when it is a true positive. It is fine if the model misses some balls, but not if it makes up ball data when there is none. Therefore, precision is used as the primary metric, with mean center error as the secondary metric. Recall is computed as a sanity check to prevent extremely low recall.
     returns tp, tn, fp, fn, mae
     tp - true positiive - ground truth has 1 ball, output of hough circles gives exactly 1 ball sufficiently localized
     tn - true negative - ground truth has 0 balls, output of hough circles gives either no balls or more than 1 ball (any output with >1 ball is considered a negative output)
@@ -288,10 +287,12 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         loss = loss_fn(pred, outputs)
         loss = loss / accumulation_steps # Divide so accumulated gradients average over the effective batch, not sum
         loss.backward() # Accumulates gradients if zero grad isn't called
+
         is_last_batch = (idx == num_batches - 1)
-        if (idx + 1) % accumulation_steps == 0 or is_last_batch: # Flush on the last batch too, so a trailing partial group still gets applied
+        if (idx + 1) % accumulation_steps == 0 or is_last_batch:
             optimizer.step()
             optimizer.zero_grad()
+
             resume_checkpoint = {
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
@@ -301,8 +302,8 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
                 "best_model_metrics": best_model_metrics
             }
             torch.save(resume_checkpoint, resume_checkpoint_path)
+
             if max_train_seconds is not None and (time.monotonic() - training_start_time) >= max_train_seconds:
-                # Stop right at this resume checkpoint save boundary
                 print(f"Time budget of {max_train_seconds}s reached after finishing batch {idx + 1} of epoch {epoch}; pausing training. Resume later with resuming=True.")
                 time_limit_reached = True
                 
@@ -333,8 +334,8 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
         tn_tot = 0
         fp_tot = 0
         fn_tot = 0 
-        error_tot = 0 # sum of dists to gt center coords; only for those classified as tp
-        for idx, batch in enumerate(data_loader): # batch is (inputs, outputs)
+        error_tot = 0 # Sum of dists to gt center coords; only for those classified as tp
+        for idx, batch in enumerate(data_loader): # Batch is (inputs, outputs)
             inputs = batch[0].to(device)
             outputs = batch[1].to(device)
             pred = model(inputs)

@@ -20,7 +20,6 @@ project_paths = ProjectPaths()
 start_time_filepart = start_time.replace(":", "-")
 end_time_filepart = end_time.replace(":", "-")
 
-# Fast metadata extraction
 print("Extracting video metadata...")
 meta_opts = {"quiet": True}
 with yt_dlp.YoutubeDL(meta_opts) as ydl:
@@ -34,20 +33,16 @@ actual_final_path = os.path.join(
     f"{title}_{start_time_filepart}_to_{end_time_filepart}.mp4"
 )
 
-# Download only the required chunk directly from YouTube's server
 print(f"Fetching and slicing clip from {start_time} to {end_time}...")
 
 ydl_opts = {
-    # H.264 (avc1) codec for full OpenCV compatibility
     "format": "bestvideo[height=1080][fps=60][ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]", # NOTE: This will throw an error if any of the conditions aren't met.
     "merge_output_format": "mp4",
     "outtmpl": actual_final_path,
     "quiet": True,
-    
-    #  ffmpeg to post-process the slice cleanly instead of stream-slicing input
     "force_keyframes_at_cuts": True,
     
-    # Download the full stream chunks safely, then cleanly slice with ffmpeg post-processor
+    # Download full chunksthen slice with ffmpeg
     "postprocessor_args": {
         "ffmpeg": [
             "-ss", start_time,
@@ -59,8 +54,6 @@ ydl_opts = {
 }
 
 
-# with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-#     ydl.download([video_url])
 
 try:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:

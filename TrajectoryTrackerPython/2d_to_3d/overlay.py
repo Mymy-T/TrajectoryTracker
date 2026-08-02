@@ -2,12 +2,6 @@ import cv2
 import numpy as np
 
 def overlay_trajectory_on_image(image_path, projected_trajectory, output_path):
-    """
-    Overlays the 2D projected trajectory onto the tennis court background image.
-    
-    - image_path: Path to your 'image_e7XzAT.png' file
-    - projected_trajectory: The list of 2D coordinates output by your projection function
-    """
     img = cv2.imread(image_path)
     if img is None:
         print(f"Error: Could not load image from {image_path}")

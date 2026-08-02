@@ -12,12 +12,8 @@ class DataSplitMode(Enum):
 
 def split_data(processed_data_path, out_path, mode, train_prop, valid_prop, frame_sequence_len=3):
     """
-    processed_data_path is the path of the processed data
-    mode is one of the options defined within DataSplitMode, and defines split boundaries
-    frame_sequence_len is the number of frames; must be >= 1
-
-    creates new folders called train_data, valid_data, & test_data; sizes are based on train_prop and valid_prop, and are approximate when mode != no_border
-    each folder has a .csv referencing the appropriate img/heatmap in the processed_data folder
+    - frame_sequence_len >= 1
+    - Sizes of train, valid, and test datasets are approximate when mode != no_border
     """
 
     if not frame_sequence_len >= 1:
@@ -62,8 +58,8 @@ def _create_data_df(processed_data_path, frame_sequence_len):
             unstacked_frame_nums += [[j for j in range(frame_sequence_len - 1, T)]] # Duplicate last element so that it becomes the column for the ground truth heatmap path when stacked
             frame_nums = np.stack(unstacked_frame_nums, axis=1)
             # NOTE: The paths saved in the csv files are relative paths; when loading them in dataset.py, join them with processed_data_path
-            convert_num_to_img_path = np.vectorize(lambda x: os.path.join(match, clip, "images", f"frame_{x:08d}.jpg")) # Name format is by convention in this project
-            convert_num_to_heatmap_path = np.vectorize(lambda x: os.path.join(match, clip, "heatmaps", f"frame_{x:08d}_heatmap.png")) # Name format is by convention in this project
+            convert_num_to_img_path = np.vectorize(lambda x: os.path.join(match, clip, "images", f"frame_{x:08d}.jpg")) 
+            convert_num_to_heatmap_path = np.vectorize(lambda x: os.path.join(match, clip, "heatmaps", f"frame_{x:08d}_heatmap.png"))
             img_paths = convert_num_to_img_path(frame_nums[:, :-1])
             heatmap_paths = convert_num_to_heatmap_path(frame_nums[:, -1:]) # Colon after -1 to prevent dimension collapse (don't drop column dimension, that's needed for concatenation)
             dataset_part = np.concatenate((img_paths, heatmap_paths), axis=1) # dataset_part has columns starting with  t-(frame_sequence_len - 1) up to img(t), and then heatmap(t); columns will be reversed outside the loop

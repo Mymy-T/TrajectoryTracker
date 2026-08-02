@@ -14,7 +14,7 @@ class PhysicsSimulation():
         self.timestep = simulation_timestep
 
     def compute_3d_trajectory(self):
-        # TEMP: simulate for 10 seconds, break if y < 0
+        # TEMP: simulate for 10 seconds, break if y < 0 bounce physics and out of bounds TODO
         trajectory = []
         num_steps = int(10 / self.timestep)
         for i in range(num_steps):
@@ -30,15 +30,12 @@ class PhysicsSimulation():
 
 
     def _compute_acceleration(self):
-        """
-        Returns the net acceleration vector
-        """
         g = np.array([0, -9.81, 0])
         v = self.ball_state.velocity
         w = self.ball_state.spin
         a_drag = -self.ball_properties.cd * np.linalg.norm(v) * v
         a_magnus = self.ball_properties.cm * np.cross(w, v)
-        return g + a_drag + a_magnus
+        return g + a_drag + a_magnus # Net acceleration vector
     
     def _forward_euler_integration_step(self, a):
         state = self.ball_state

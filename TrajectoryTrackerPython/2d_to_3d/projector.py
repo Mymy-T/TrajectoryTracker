@@ -1,6 +1,3 @@
-# take in trajectory
-# convert each 3d point into a homogenous coordinate; then, project into 2d (image coords) through extrinsic and intrinsic matrices; dehomogenize 2d coords and plot
-
 import cv2
 from data_models import CourtProperties
 from enum import Enum
@@ -16,7 +13,7 @@ class WorldCoordSet(Enum):
 
 def _generate_3d_baseline_coords(coord_set: WorldCoordSet):
     """
-    Returns a ndarray of size 4 x 3; each row is a 3D coord; the rows are ordered as far_left, far_right, near_left, near_right
+    Returns a ndarray of size 4 x 3; each row is a 3D coord; the rows are ordered as far_left, far_right, near_left, near_right, in that precise order
     """
     court_properties = CourtProperties()
     w = court_properties.court_width
@@ -71,10 +68,7 @@ def obtain_extrinsics(world_points: np.ndarray, image_points: np.ndarray, intrin
 
 
 def homogenize(coords: np.ndarray):
-    """
-    Convert an (N, D) array of heterogeneous coordinates to (N, D + 1) homogeneous.
-    """
-    if coords.ndim == 1: # Handle 1D array as a single point
+    if coords.ndim == 1:
         return np.append(coords, 1.0)
         
     ones = np.ones((coords.shape[0], 1), dtype=coords.dtype)
@@ -82,20 +76,14 @@ def homogenize(coords: np.ndarray):
 
 
 def dehomogenize(coords: np.ndarray):
-    """
-    Convert an (N, D) array of homogeneous coordinates to (N, D - 1) heterogeneous.
-    """
     if coords.ndim == 1:
         return coords[:-1] / coords[-1]
     
-    return coords[:, :-1] / coords[:, -1:] # Shape of (N, D - 1) divided by shape of (N, 1) by broadcasting
+    return coords[:, :-1] / coords[:, -1:]
 
 
 def create_projection_matrix(simplified_intrinsics: np.ndarray, extrinsics: np.ndarray):
-    """
-    Creates the projection matrix (K @ M2 @ M1, see https://visionbook.mit.edu/imaging_geometry.html#full-camera-model)
-    """
-    return np.matmul(_expand_intrinsics_matrix(simplified_intrinsics), extrinsics)
+    return np.matmul(_expand_intrinsics_matrix(simplified_intrinsics), extrinsics) # https://visionbook.mit.edu/imaging_geometry.html#full-camera-model
 
 
 def project_trajectory_to_2d(trajectory: list, projection_matrix: np.ndarray):
@@ -118,11 +106,9 @@ def plot_2d_trajectory(trajectory):
     l = court_properties.court_length
     w = court_properties.court_width
 
-    print(f"Num points in trajectory: {len(projected_trajectory)}")
-
     # t = np.linspace(0, end_time, int(10/0.001))
-    x = [point[0] for point in projected_trajectory]
-    y = [1080 - point[1] for point in projected_trajectory]
+    x = [point[0] for point in trajectory]
+    y = [1080 - point[1] for point in trajectory]
 
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.plot(x, y, label='Projected 2D Trajectory', color='b', linewidth=2)
