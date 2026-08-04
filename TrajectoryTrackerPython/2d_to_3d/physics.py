@@ -1,5 +1,5 @@
 import copy
-from data_models import BallState, BallProperties, CourtProperties
+from data_models import BallState, BallProperties, CourtProperties, EnvironmentProperties
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -7,10 +7,11 @@ class PhysicsSimulation():
     """
     Class for simulating ball trajectories. The simulator's copy of the initial ball state will be modified in place.
     """
-    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties()):
+    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), environment_properties = EnvironmentProperties()):
         self.ball_state = copy.deepcopy(initial_state)
         self.ball_properties = ball_properties
         self.court_properties = court_properties
+        self.environment_properties = environment_properties
         self.timestep = simulation_timestep
 
     def compute_3d_trajectory(self):
@@ -19,8 +20,8 @@ class PhysicsSimulation():
         num_steps = int(10 / self.timestep)
         for i in range(num_steps):
             trajectory.append(self.ball_state.position.copy())
-            a = self._compute_acceleration()
-            self._forward_euler_integration_step(a)
+            a, alpha = self._compute_accelerations()
+            self._forward_euler_integration_step(a, alpha)
             y = self.ball_state.position[1]
             if y <= 0:
                 end_time = i * self.timestep
@@ -29,20 +30,37 @@ class PhysicsSimulation():
         return trajectory, end_time
 
 
-    def _compute_acceleration(self):
-        g = np.array([0, -9.81, 0])
+    def _compute_accelerations(self):
+        m = self.ball_properties.m
+        A = self.ball_properties.A
+        I = self.ball_properties.I
+        C_d = self.ball_properties.C_d
+        C_l = self.ball_properties.C_l
+        C_m = self.ball_properties.C_m
+        g_scalar = self.environment_properties.g
+        rho = self.environment_properties.rho
+        mu = self.environment_properties.mu
+
         v = self.ball_state.velocity
         w = self.ball_state.spin
-        a_drag = -self.ball_properties.cd * np.linalg.norm(v) * v
-        a_magnus = self.ball_properties.cm * np.cross(w, v)
-        return g + a_drag + a_magnus # Net acceleration vector
+
+        F_g = m * np.array([0, -g_scalar, 0])
+        F_d = -0.5 * C_d * rho * A * np.linalg.norm(v) * v
+        F_m = 0.5 * C_l * rho * A * np.linalg.norm(v)**2 * (np.cross(w, v) / np.linalg.norm(np.cross(w, v)))
+        tau_d = -0.5 * C_m * rho * A * np.linalg.norm(v)**2 * (w / np.linalg.norm(w))
+        
+        a_net = (F_g + F_d + F_m) / m
+        alpha_net = tau_d / I
+        return a_net, alpha_net
     
-    def _forward_euler_integration_step(self, a):
+    def _forward_euler_integration_step(self, a, alpha): # NOTE: Used only for early testing purposes; will be replaced by a more precise algorithm, eg runge-kutta
         state = self.ball_state
         t = self.timestep
-        # NOTE: Used only for early testing purposes; will be replaced by a more precise algorithm, eg runge-kutta
+
         state.position += state.velocity * t
         state.velocity += a * t
+
+        state.spin += alpha * t
 
 
 def generate_sample_trajectory():

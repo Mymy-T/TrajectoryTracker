@@ -1,18 +1,39 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import math
 import numpy as np
 
 @dataclass(frozen=True)
+class EnvironmentProperties:
+    """
+    g - gravitational acceleration (m/s^2)
+    rho - air density @ 20 degrees C (kg/m^3)
+    mu - dynamic visocisty of air @ 20 degrees C and 1 atm (Pa * s)
+    """
+    g: float = 9.81
+    rho: float = 1.205
+    mu: float = 1.81e-5
+
+@dataclass
 class BallProperties:
     """
-    - mass is measured in kg
-    - radius is measured in m
-    - cd is measured in m^-1
-    - cm is measured in rad^-1
+    m - mass (kg)
+    R - ball radius (m)
+    A - ball cross sectional area (m^2); automatically computed
+    I - moment of inertia (kg * m^2)
+    C_d - drag coefficient (dimensionless)
+    C_l - lift coefficient associated with Magnus effect (dimensionless)
+    C_m - drag aerodynamic moment coefficient
     """
-    mass: float = 0.057
-    radius: float = 0.033
-    cd: float = 0.02
-    cm: float = 1.2e-3
+    m: float = 0.057
+    R: float = 0.0325
+    A: float = field(init=False) 
+    I: float = 3.155e-5
+    C_d: float = 0.53 # TODO: Change as needed, do more research on this
+    C_l: float = 0.4 # TODO: Placeholder value
+    C_m: float = 0.01 # TODO: Figure out if this is in units of m or dimensionless and if there's a typo in the paper
+
+    def __post_init__(self):
+        self.A = math.pi * self.R**2
 
 @dataclass(frozen=True)
 class CourtProperties:
