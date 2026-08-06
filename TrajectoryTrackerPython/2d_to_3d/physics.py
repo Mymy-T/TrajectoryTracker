@@ -1,5 +1,6 @@
 import copy
-from data_models import BallState, BallProperties, CourtProperties, EnvironmentProperties
+from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -7,15 +8,17 @@ class PhysicsSimulation():
     """
     Class for simulating ball trajectories. The simulator's copy of the initial ball state will be modified in place.
     """
-    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), environment_properties = EnvironmentProperties()):
+    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), bounce_properties = BounceProperties(), environment_properties = EnvironmentProperties()):
         self.ball_state = copy.deepcopy(initial_state)
         self.ball_properties = ball_properties
         self.court_properties = court_properties
+        self.bounce_properties = bounce_properties
         self.environment_properties = environment_properties
         self.timestep = simulation_timestep
 
     def compute_3d_trajectory(self):
         # TEMP: simulate for 10 seconds, break if y < 0 bounce physics and out of bounds TODO
+        n_bounces = 0
         trajectory = []
         num_steps = int(10 / self.timestep)
         for i in range(num_steps):
@@ -24,9 +27,21 @@ class PhysicsSimulation():
             self._forward_euler_integration_step(a, alpha)
             y = self.ball_state.position[1]
             if y <= 0:
+                prev_x = self.ball_state.position[0]
+                prev_z = self.ball_state.position[2]
+                start_pos = np.array([prev_x, 0, prev_z])
+                self.ball_state.position = start_pos
+                vf, wf = self._compute_bounce()
+                n_bounces += 1
+                self.ball_state.velocity = vf
+                self.ball_state.spin = wf
+            
+            out_of_bounds = (abs(self.ball_state.position[0]) > self.court_properties.court_length/2 + 3 or abs(self.ball_state.position[2]) > self.court_properties.court_width/2 + 3)
+
+            if n_bounces == 4 or out_of_bounds:
                 end_time = i * self.timestep
                 break
-        
+            
         return trajectory, end_time
 
 
@@ -53,7 +68,73 @@ class PhysicsSimulation():
         alpha_net = tau_d / I
         return a_net, alpha_net
     
+
+    def _compute_bounce(self):
+        """
+        This bounce model assumes:
+        - Tennis ball is rigid body
+        - Ratio |v_slip_z| / |v_slip_x| remains approximately constant
+        - Normal force as a function of time is of the form N = asin(bt) where b = pi/T_c and T_c is the time of contact
+        - Moment of inertia is of the general form 2/3 * mR^2
+
+        This function doesn't modify ball state in place.
+        """
+        ball_properties = BallProperties()
+        e = self.bounce_properties.e
+        mu = self.bounce_properties.mu
+        R = ball_properties.R
+        v = self.ball_state.velocity
+        w = self.ball_state.spin
+
+        v_ox = v[0]
+        w_oz = w[2]
+
+        v_oz = v[2]
+        w_ox = w[0]
+
+        v_oy = v[1]
+        w_oy = w[1]
+
+        # Compute effective mu for x and z directions so that at least the initial frictional force magnitude is mu*N and not sqrt(2)*mu*N
+        v_slip = np.array([v_ox + R*w_oz, v_oz - R*w_ox])
+        v_slip_norm = np.linalg.norm(v_slip)
+        mu_x = mu * abs(v_slip[0]) / v_slip_norm
+        mu_z = mu * abs(v_slip[1]) / v_slip_norm
+
+        # Check if rolling will occur or if slipping occurs throughout the entire motion
+        rolling_in_x = (0.4 * abs(v_slip[0]) <= mu_x * (1 + e) * abs(v_oy))
+        rolling_in_z = (0.4 * abs(v_slip[1]) <= mu_z * (1 + e) * abs(v_oy))
+        
+        # Compute final state
+
+        v_fy = -e * v_oy
+        w_fy = w_oy
+
+        if rolling_in_x:
+            v_fx = (3*v_ox - 2*R*w_oz) / 5
+            w_fz = (2*R*w_oz - 3*v_ox) / (5*R)
+        else:
+            v_fx = v_ox + mu_x * math.copysign(1, v_slip[0]) * v_oy * (1 + e)
+            w_fz = w_oz + 3 * mu_x * math.copysign(1, v_slip[0]) * v_oy * (1 + e) / (2 * R)
+
+        if rolling_in_z:
+            v_fz = (3*v_oz + 2*R*w_ox) / 5
+            w_fx = (2*R*w_ox + 3*v_oz) / (5*R)
+        else:
+            v_fz = v_oz + mu_z * math.copysign(1, v_slip[1]) * v_oy * (1 + e)
+            w_fx = w_ox - 3 * mu_z * math.copysign(1, v_slip[1]) * v_oy * (1 + e) / (2 * R)
+        
+        v_f = np.array([v_fx, v_fy, v_fz])
+        w_f = np.array([w_ox, w_oy, w_oz])
+
+        return v_f, w_f
+
+
+    
     def _forward_euler_integration_step(self, a, alpha): # NOTE: Used only for early testing purposes; will be replaced by a more precise algorithm, eg runge-kutta
+        """
+        This function modifies the ball state in place.
+        """
         state = self.ball_state
         t = self.timestep
 

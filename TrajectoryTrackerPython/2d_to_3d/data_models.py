@@ -36,6 +36,15 @@ class BallProperties:
         self.A = math.pi * self.R**2
 
 @dataclass(frozen=True)
+class BounceProperties:
+    """
+    e - coefficient of resitution (dimensionless)
+    mu - coefficient of friction between ball and court (dimensionless)
+    """
+    e: float = 0.75 # Dignall, 2004
+    mu: float = 0.55 # Dignall, 2004
+
+@dataclass(frozen=True)
 class CourtProperties:
     """
     All variables are measured in meters.
