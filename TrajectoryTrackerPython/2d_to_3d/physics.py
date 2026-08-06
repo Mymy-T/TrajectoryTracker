@@ -1,4 +1,6 @@
 import copy
+
+from networkx import omega
 from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
 import math
 import matplotlib.pyplot as plt
@@ -23,8 +25,7 @@ class PhysicsSimulation():
         num_steps = int(10 / self.timestep)
         for i in range(num_steps):
             trajectory.append(self.ball_state.position.copy())
-            a, alpha = self._compute_accelerations()
-            self._forward_euler_integration_step(a, alpha)
+            self._rk4_step()
             y = self.ball_state.position[1]
             if y <= 0:
                 prev_x = self.ball_state.position[0]
@@ -45,7 +46,7 @@ class PhysicsSimulation():
         return trajectory, end_time
 
 
-    def _compute_accelerations(self):
+    def _compute_accelerations(self, v, w):
         m = self.ball_properties.m
         A = self.ball_properties.A
         I = self.ball_properties.I
@@ -55,9 +56,6 @@ class PhysicsSimulation():
         g_scalar = self.environment_properties.g
         rho = self.environment_properties.rho
         mu = self.environment_properties.mu
-
-        v = self.ball_state.velocity
-        w = self.ball_state.spin
 
         F_g = m * np.array([0, -g_scalar, 0])
         F_d = -0.5 * C_d * rho * A * np.linalg.norm(v) * v
@@ -125,30 +123,73 @@ class PhysicsSimulation():
             w_fx = w_ox - 3 * mu_z * math.copysign(1, v_slip[1]) * v_oy * (1 + e) / (2 * R)
         
         v_f = np.array([v_fx, v_fy, v_fz])
-        w_f = np.array([w_ox, w_oy, w_oz])
+        w_f = np.array([w_fx, w_fy, w_fz])
 
         return v_f, w_f
 
 
     
-    def _forward_euler_integration_step(self, a, alpha): # NOTE: Used only for early testing purposes; will be replaced by a more precise algorithm, eg runge-kutta
+    def _forward_euler_integration_step(self): # Obsolete due to RK4
         """
-        This function modifies the ball state in place.
+        Ball state is modified in place.
         """
         state = self.ball_state
-        t = self.timestep
+        dt = self.timestep
 
-        state.position += state.velocity * t
-        state.velocity += a * t
+        a, alpha = self._compute_accelerations(state.velocity, state.spin)
 
-        state.spin += alpha * t
+        state.position += state.velocity * dt
+        state.velocity += a * dt
+
+        state.spin += alpha * dt
+    
+    def _rk4_step(self):
+        """
+        Ball state is modified in place.
+        """
+        state = self.ball_state
+        dt = self.timestep
+        x1 = state.position
+        v1 = state.velocity
+        w1 = state.spin
+
+        k1_x = state.velocity
+        k1_v, k1_w = self._compute_accelerations(v1, w1)
+
+        x2 = x1 + 0.5 * dt * k1_x
+        v2 = v1 + 0.5 * dt * k1_v
+        w2 = w1 + 0.5 * dt * k1_w
+        k2_x = v2
+        k2_v, k2_w = self._compute_accelerations(v2, w2)
+
+        x3 = x1 + 0.5 * dt * k2_x
+        v3 = v1 + 0.5 * dt * k2_v
+        w3 = w1 + 0.5 * dt * k2_w
+        k3_x = v3
+        k3_v, k3_w = self._compute_accelerations(v3, w3)
+
+        x4 = x1 + dt * k3_x
+        v4 = v1 + dt * k3_v
+        w4 = w1 + dt * k3_w
+        k4_x = v4
+        k4_v, k4_w = self._compute_accelerations(v4, w4)
+
+        x_next = x1 + (dt / 6.0) * (k1_x + 2.0 * k2_x + 2.0 * k3_x + k4_x)
+        v_next = v1 + (dt / 6.0) * (k1_v + 2.0 * k2_v + 2.0 * k3_v + k4_v)
+        w_next = w1 + (dt / 6.0) * (k1_w + 2.0 * k2_w + 2.0 * k3_w + k4_w)
+
+        state.position = x_next
+        state.velocity = v_next
+        state.spin = w_next
+
 
 
 def generate_sample_trajectory():
     court_properties = CourtProperties()
     l = court_properties.court_length
-    x_i = np.array([-l/2, 1, 0]).astype(float)
-    v_i = np.array([30, 7, 0]).astype(float)
+    w = court_properties.court_width
+    x_i = np.array([-l/2, 1, -w/4]).astype(float)
+    v_i = np.array([20, 7, 5]).astype(float)
     spin_i = np.array([0, -300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s right sidespin; exaggerated to show spin effects
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
     simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=0.001)
