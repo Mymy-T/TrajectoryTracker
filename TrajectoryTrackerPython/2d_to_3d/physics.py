@@ -1,6 +1,4 @@
 import copy
-
-from networkx import omega
 from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
 import math
 import matplotlib.pyplot as plt
@@ -73,7 +71,7 @@ class PhysicsSimulation():
         - Tennis ball is rigid body
         - Ratio |v_slip_z| / |v_slip_x| remains approximately constant
         - Normal force as a function of time is of the form N = asin(bt) where b = pi/T_c and T_c is the time of contact
-        - Moment of inertia is of the general form 2/3 * mR^2
+        - Moment of inertia is of the general form 2/3 * m * R^2
 
         This function doesn't modify ball state in place.
         """
@@ -190,7 +188,7 @@ def generate_sample_trajectory():
     w = court_properties.court_width
     x_i = np.array([-l/2, 1, -w/4]).astype(float)
     v_i = np.array([20, 7, 5]).astype(float)
-    spin_i = np.array([0, -300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s right sidespin; exaggerated to show spin effects
+    spin_i = np.array([0, 300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s left sidespin; exaggerated to show spin effects
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
     simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=0.001)
     return simulation.compute_3d_trajectory()
@@ -214,7 +212,7 @@ def plot_3d_trajectory(trajectory):
     
     # Plotting
     fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111, projection='3d')
+    ax = fig.add_subplot(111, projection="3d")
 
 
     # Outer court lines
@@ -276,11 +274,11 @@ def plot_3d_trajectory(trajectory):
 
 
     # Plot trajectory
-    ax.plot(x, z, y, label='3D Trajectory', color='b', linewidth=2)
+    ax.plot(x, z, y, label="3D Trajectory", color="b", linewidth=2)
 
     # Highlight start and end points
-    ax.scatter(x[0], z[0], y[0], color='green', s=50, label='Start')
-    ax.scatter(x[-1], z[-1], y[-1], color='red', s=50, label='End')
+    ax.scatter(x[0], z[0], y[0], color="green", s=50, label="Start")
+    ax.scatter(x[-1], z[-1], y[-1], color="red", s=50, label="End")
 
     ax.set_xlim([-l/2 - 1, l/2 + 1])    
     ax.set_ylim([-w/2 - 1, w/2 + 1])
@@ -289,10 +287,11 @@ def plot_3d_trajectory(trajectory):
     ax.set_box_aspect([l, w, 4])
 
     # NOTE: In matplotlib, +z is up; in the coordinates of the trajectory, +y is up
-    ax.set_xlabel('X Axis')
-    ax.set_ylabel('Z Axis')
-    ax.set_zlabel('Y Axis')
-    ax.set_title('3D Path Trajectory')
+    ax.set_xlabel("X Axis")
+    ax.set_ylabel("Z Axis")
+    ax.set_zlabel("Y Axis")
+    ax.set_title("3D Path Trajectory")
+    ax.grid(False)
     ax.legend()
 
     plt.show()
