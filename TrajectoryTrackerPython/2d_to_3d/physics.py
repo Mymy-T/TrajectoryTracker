@@ -1,5 +1,6 @@
 import copy
 from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
+from fractions import Fraction
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -16,32 +17,36 @@ class PhysicsSimulation():
         self.environment_properties = environment_properties
         self.timestep = simulation_timestep
 
-    def compute_3d_trajectory(self):
+    def compute_3d_trajectory(self, bounces=True):
         # TEMP: simulate for 10 seconds, break if y < 0 bounce physics and out of bounds TODO
         n_bounces = 0
         trajectory = []
-        num_steps = int(10 / self.timestep)
-        for i in range(num_steps):
+        times = []
+        max_num_steps = int(10 / self.timestep)
+        for i in range(max_num_steps):
             trajectory.append(self.ball_state.position.copy())
+            times.append(i * self.timestep)
             self._rk4_step()
             y = self.ball_state.position[1]
             if y <= 0:
-                prev_x = self.ball_state.position[0]
-                prev_z = self.ball_state.position[2]
-                start_pos = np.array([prev_x, 0, prev_z])
-                self.ball_state.position = start_pos
-                vf, wf = self._compute_bounce()
-                n_bounces += 1
-                self.ball_state.velocity = vf
-                self.ball_state.spin = wf
+                if bounces:
+                    prev_x = self.ball_state.position[0]
+                    prev_z = self.ball_state.position[2]
+                    start_pos = np.array([prev_x, 0, prev_z])
+                    self.ball_state.position = start_pos
+                    vf, wf = self._compute_bounce()
+                    n_bounces += 1
+                    self.ball_state.velocity = vf
+                    self.ball_state.spin = wf
+                else:
+                    break
             
-            out_of_bounds = (abs(self.ball_state.position[0]) > self.court_properties.court_length/2 + 3 or abs(self.ball_state.position[2]) > self.court_properties.court_width/2 + 3)
 
+            out_of_bounds = (abs(self.ball_state.position[0]) > self.court_properties.court_length/2 + 3 or abs(self.ball_state.position[2]) > self.court_properties.court_width/2 + 3)
             if n_bounces == 4 or out_of_bounds:
-                end_time = i * self.timestep
                 break
             
-        return trajectory, end_time
+        return np.array(trajectory), np.array(times)
 
 
     def _compute_accelerations(self, v, w):
@@ -179,7 +184,7 @@ class PhysicsSimulation():
 
 
 
-def generate_sample_trajectory():
+def generate_sample_trajectory(timestep=0.001, bounces=True):
     court_properties = CourtProperties()
     l = court_properties.court_length
     w = court_properties.court_width
@@ -187,8 +192,9 @@ def generate_sample_trajectory():
     v_i = np.array([20, 7, 5]).astype(float)
     spin_i = np.array([0, 300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s left sidespin; exaggerated to show spin effects
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
-    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=0.001)
-    return simulation.compute_3d_trajectory()
+    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep)
+    return simulation.compute_3d_trajectory(bounces=bounces) # trajectory, end_time
+
 
 
 def plot_3d_trajectory(trajectory):
@@ -299,4 +305,3 @@ if __name__ == "__main__":
     print(f"Num points in trajectory: {len(trajectory)}")
 
     plot_3d_trajectory(trajectory)
-

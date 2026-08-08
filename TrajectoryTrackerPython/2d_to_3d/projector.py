@@ -151,7 +151,7 @@ if __name__ == "__main__":
     print(extrinsics if extrinsics is not None else "Failure to obtain extrinsics")
 
     if extrinsics is not None:
-        trajectory, end_time = generate_sample_trajectory()
+        trajectory, _ = generate_sample_trajectory()
         projection_matrix = create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
         projected_trajectory = project_trajectory_to_2d(trajectory, projection_matrix)
 
