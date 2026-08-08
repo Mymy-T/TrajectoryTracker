@@ -27,7 +27,7 @@ class BallProperties:
     m: float = 0.057
     R: float = 0.0325
     A: float = field(init=False) 
-    I: float = 3.155e-5
+    I: float = 3.155e-5 # NOTE: This value may differ from the value used in the bounce model, as the bounce model assumed I = 2/3 * m * R^2; fixing this discrepancy could be a TODO
     C_d: float = 0.53 # TODO: Change as needed, do more research on this
     C_l: float = 0.4 # TODO: Placeholder value
     C_m: float = 0.01 # TODO: Figure out if this is in units of m or dimensionless and if there's a typo in the paper

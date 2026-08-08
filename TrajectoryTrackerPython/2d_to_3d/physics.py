@@ -154,19 +154,16 @@ class PhysicsSimulation():
         k1_x = state.velocity
         k1_v, k1_w = self._compute_accelerations(v1, w1)
 
-        x2 = x1 + 0.5 * dt * k1_x
         v2 = v1 + 0.5 * dt * k1_v
         w2 = w1 + 0.5 * dt * k1_w
         k2_x = v2
         k2_v, k2_w = self._compute_accelerations(v2, w2)
 
-        x3 = x1 + 0.5 * dt * k2_x
         v3 = v1 + 0.5 * dt * k2_v
         w3 = w1 + 0.5 * dt * k2_w
         k3_x = v3
         k3_v, k3_w = self._compute_accelerations(v3, w3)
 
-        x4 = x1 + dt * k3_x
         v4 = v1 + dt * k3_v
         w4 = w1 + dt * k3_w
         k4_x = v4

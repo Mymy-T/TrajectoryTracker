@@ -111,20 +111,20 @@ def plot_2d_trajectory(trajectory):
     y = [1080 - point[1] for point in trajectory]
 
     fig, ax = plt.subplots(figsize=(8, 6))
-    ax.plot(x, y, label='Projected 2D Trajectory', color='b', linewidth=2)
+    ax.plot(x, y, label="Projected 2D Trajectory", color="b", linewidth=2)
 
     # Highlight start and end points
-    ax.scatter(x[0], y[0], color='green', s=50, label='Start')
-    ax.scatter(x[-1], y[-1], color='red', s=50, label='End')
+    ax.scatter(x[0], y[0], color="green", s=50, label="Start")
+    ax.scatter(x[-1], y[-1], color="red", s=50, label="End")
 
     # Set limits based on court dimensions or pixel limits if applicable
     # TODO: convert to 640 by 360 to simulate true data
     ax.set_xlim([0, 1920])
     ax.set_ylim([0, 1080])
 
-    ax.set_xlabel('X Axis (2D Projection)')
-    ax.set_ylabel('Y Axis (2D Projection)')
-    ax.set_title('2D Projected Trajectory')
+    ax.set_xlabel("X Axis (2D Projection)")
+    ax.set_ylabel("Y Axis (2D Projection)")
+    ax.set_title("2D Projected Trajectory")
     ax.legend()
 
     plt.show()
