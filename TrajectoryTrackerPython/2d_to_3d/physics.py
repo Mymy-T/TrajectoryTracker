@@ -1,6 +1,5 @@
 import copy
 from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
-from fractions import Fraction
 import math
 import matplotlib.pyplot as plt
 import numpy as np
@@ -196,8 +195,40 @@ def generate_sample_trajectory(timestep=0.001, bounces=True):
     return simulation.compute_3d_trajectory(bounces=bounces) # trajectory, end_time
 
 
+def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces=True, position_bounds=None, velocity_bounds=None, spin_bounds=None):
+    """
+    Same as generate_sample_trajectory, but the initial ball state is sampled at random
+    (via rng) within position_bounds/velocity_bounds/spin_bounds instead of being hardcoded.
 
-def plot_3d_trajectory(trajectory):
+    - Each bounds argument is a pair (low, high) where low and high are length-3 ndarrays
+    - Defaults are centered around the same values used by generate_sample_trajectory.
+    """
+    court_properties = CourtProperties()
+    l = court_properties.court_length
+    w = court_properties.court_width
+
+    if position_bounds is None:
+        position_bounds = ([-l/2, 0.5, -w/2], [-l/2, 1.5, w/2])
+    if velocity_bounds is None:
+        velocity_bounds = ([10, 3, -8], [30, 10, 8])
+    if spin_bounds is None:
+        spin_bounds = ([-400, -400, -400], [400, 400, 400])
+
+    x_i = rng.uniform(position_bounds[0], position_bounds[1]).astype(float)
+    v_i = rng.uniform(velocity_bounds[0], velocity_bounds[1]).astype(float)
+    spin_i = rng.uniform(spin_bounds[0], spin_bounds[1]).astype(float)
+
+    ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
+    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep)
+    
+    return simulation.compute_3d_trajectory(bounces=bounces) # trajectory, times
+
+
+def plot_3d_trajectory(trajectory, ax=None):
+    """
+    If ax is None, creates a new figure/3D axes and calls plt.show() at the end (standalone use);
+    else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
+    """
     court_properties = CourtProperties()
     l = court_properties.court_length
     w = court_properties.court_width
@@ -212,10 +243,12 @@ def plot_3d_trajectory(trajectory):
         x.append(point[0])
         y.append(point[1])
         z.append(point[2])
-    
+
     # Plotting
-    fig = plt.figure(figsize=(8, 6))
-    ax = fig.add_subplot(111, projection="3d")
+    standalone = ax is None
+    if standalone:
+        fig = plt.figure(figsize=(8, 6))
+        ax = fig.add_subplot(111, projection="3d")
 
 
     # Outer court lines
@@ -297,7 +330,8 @@ def plot_3d_trajectory(trajectory):
     ax.grid(False)
     ax.legend()
 
-    plt.show()
+    if standalone:
+        plt.show()
 
 if __name__ == "__main__":
     trajectory, end_time = generate_sample_trajectory()

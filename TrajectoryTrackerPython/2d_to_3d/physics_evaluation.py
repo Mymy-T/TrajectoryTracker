@@ -65,14 +65,7 @@ def assess_trajectory_error(timesteps: list, reference_timestep: float):
         no_bounce_times_valid = no_bounce_times[no_bounce_valid_mask]
         no_bounce_trajectory_valid = no_bounce_trajectory[no_bounce_valid_mask]
 
-        no_bounce_reference_interp = np.column_stack([
-            np.interp(
-                no_bounce_times_valid,
-                no_bounce_reference_times,
-                no_bounce_reference_trajectory[:, dim]
-            )
-            for dim in range(3)
-        ])
+        no_bounce_reference_interp = np.column_stack( [np.interp(no_bounce_times_valid, no_bounce_reference_times, no_bounce_reference_trajectory[:, dim]) for dim in range(3)] )
 
         no_bounce_errors = np.linalg.norm(no_bounce_trajectory_valid - no_bounce_reference_interp, axis=1)
 
