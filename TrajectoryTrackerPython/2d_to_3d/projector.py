@@ -3,13 +3,11 @@ from data_models import CourtProperties
 from enum import Enum
 import json
 from manual_keypoint_labeler import obtain_keypoints
-from matplotlib.collections import LineCollection
-import matplotlib.pyplot as plt
 import numpy as np
 import os
-from overlay import overlay_trajectory_on_image
 from projection_component_paths import Paths
 from physics import generate_sample_trajectory
+from visualizer import overlay_trajectory_on_image, plot_2d_trajectory
 
 class WorldCoordSet(Enum):
     SERVICE_LINE = 1
@@ -164,72 +162,6 @@ def project_trajectory_to_2d(trajectory: np.ndarray, projection_matrix: np.ndarr
         projected_trajectory.append(projection)
     
     return np.stack(projected_trajectory, axis=0)
-
-
-def _plot_fading_line_2d(ax, x, y, fade_window, label=None, color=(0.0, 0.0, 1.0)):
-    """
-    The newest segment is fully opaque; opacity ramps down linearly over the trailing fade_window points, and anything older than fade_window points back is omitted entirely
-    """
-    n_points = len(x)
-    start_index = max(0, n_points - 1 - int(round(fade_window)))
-
-    xs = np.asarray(x[start_index:])
-    ys = np.asarray(y[start_index:])
-    if len(xs) < 2:
-        return
-
-    points = np.array([xs, ys]).T.reshape(-1, 1, 2)
-    segments = np.concatenate([points[:-1], points[1:]], axis=1)
-
-    # age (in points) of each segment's newer endpoint; 0 = the current/newest frame
-    newest_index = n_points - 1
-    segment_end_indices = start_index + np.arange(1, len(segments) + 1)
-    ages = newest_index - segment_end_indices
-    alphas = np.clip(1.0 - ages / fade_window, 0.0, 1.0) if fade_window > 0 else np.ones(len(segments))
-
-    colors = [(*color, a) for a in alphas]
-    ax.add_collection(LineCollection(segments, colors=colors, linewidth=2, label=label))
-
-
-def plot_2d_trajectory(trajectory, ax=None, fade_window=None):
-    """
-    If ax is None, creates a new figure/axes and calls plt.show() at the end (standalone use);
-    else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
-    """
-    court_properties = CourtProperties()
-    l = court_properties.court_length
-    w = court_properties.court_width
-
-    # t = np.linspace(0, end_time, int(10/0.001))
-    x = [point[0] for point in trajectory]
-    y = [1080 - point[1] for point in trajectory]
-
-    standalone = ax is None
-    if standalone:
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-    if fade_window is not None and len(x) > 1:
-        _plot_fading_line_2d(ax, x, y, fade_window, label="Projected 2D Trajectory")
-    else:
-        ax.plot(x, y, label="Projected 2D Trajectory", color="b", linewidth=2)
-
-    # Highlight start and end points
-    ax.scatter(x[0], y[0], color="green", s=50, label="Start")
-    ax.scatter(x[-1], y[-1], color="red", s=50, label="End")
-
-    # Set limits based on court dimensions or pixel limits if applicable
-    # TODO: convert to 640 by 360 to simulate true data
-    ax.set_xlim([0, 1920])
-    ax.set_ylim([0, 1080])
-
-    ax.set_xlabel("X Axis (2D Projection)")
-    ax.set_ylabel("Y Axis (2D Projection)")
-    ax.set_title("2D Projected Trajectory")
-    ax.legend()
-
-    if standalone:
-        plt.show()
-
 
 
 if __name__ == "__main__":

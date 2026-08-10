@@ -7,10 +7,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from overlay import overlay_trajectory_on_image
-from physics import plot_3d_trajectory
 from projection_component_paths import Paths
 import projector as proj
+from visualizer import overlay_trajectory_on_image, plot_2d_trajectory, plot_3d_trajectory
 
 DISPLAY_IMAGE_SIZE = (640, 360) # (width, height); matches the resolution real inference video frames are resized to
 RENDER_DEBOUNCE_MS = 80 # delay before rendering a tree selection, so rapid clicking only renders the settled-on item
@@ -248,7 +247,7 @@ class DatasetExplorerApp(tk.Tk):
         plot_3d_trajectory(traj_3d, ax=self.ax_3d, fade_window=fade_window)
 
         self.ax_2d_plot.clear()
-        proj.plot_2d_trajectory(traj_2d, ax=self.ax_2d_plot, fade_window=fade_window)
+        plot_2d_trajectory(traj_2d, ax=self.ax_2d_plot, fade_window=fade_window)
 
         overlay_img = overlay_trajectory_on_image(self.paths.sample_image_path, traj_2d_small, output_path=None, base_image=self._base_image_small, fade_window=fade_window)
         self.ax_2d_overlay.clear()

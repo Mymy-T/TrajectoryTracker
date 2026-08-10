@@ -2,15 +2,11 @@ import copy
 from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
 from enum import Enum
 import math
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import numpy as np
+from visualizer import plot_3d_trajectory
 
 
 class TrajectoryMode(Enum):
-    """
-    Modes supported by PhysicsSimulation.compute_3d_trajectory.
-    """
     NO_BOUNCE = "no_bounce"        # stop as soon as the ball would touch the ground
     BOUNCE_ONLY = "bounce_only"    # a single shot with up to max_bounces ground bounces
     BOUNCE_AND_HIT = "bounce_and_hit"  # a multi-hit rally (ground bounces + racket hits)
@@ -367,6 +363,7 @@ class PhysicsSimulation():
 
         state.spin += alpha * dt
     
+
     def _rk4_step(self):
         """
         Ball state is modified in place.
@@ -455,144 +452,8 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces
     return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times
 
 
-def _plot_fading_line_3d(ax, plot_x, plot_y, plot_z, fade_window, label=None, color=(0.0, 0.0, 1.0)):
-    """
-    The newest segment is fully opaque; opacity ramps down linearly over the trailing fade_window points, and anything older than fade_window points back is omitted entirely
-    """
-    n_points = len(plot_x)
-    start_index = max(0, n_points - 1 - int(round(fade_window)))
-
-    x = np.asarray(plot_x[start_index:])
-    y = np.asarray(plot_y[start_index:])
-    z = np.asarray(plot_z[start_index:])
-    if len(x) < 2:
-        return
-
-    points = np.array([x, y, z]).T.reshape(-1, 1, 3)
-    segments = np.concatenate([points[:-1], points[1:]], axis=1)
-
-    # age (in points) of each segment's newer endpoint; 0 = the current/newest frame
-    newest_index = n_points - 1
-    segment_end_indices = start_index + np.arange(1, len(segments) + 1)
-    ages = newest_index - segment_end_indices
-    alphas = np.clip(1.0 - ages / fade_window, 0.0, 1.0) if fade_window > 0 else np.ones(len(segments))
-
-    colors = [(*color, a) for a in alphas]
-    ax.add_collection3d(Line3DCollection(segments, colors=colors, linewidth=2, label=label))
-
-
-def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
-    """
-    If ax is None, creates a new figure/3D axes and calls plt.show() at the end (standalone use);
-    else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
-    """
-    court_properties = CourtProperties()
-    l = court_properties.court_length
-    w = court_properties.court_width
-    sw = court_properties.singles_width
-    sld = court_properties.service_line_dist_from_net
-
-    x = []
-    y = []
-    z = []
-    for point in trajectory:
-        x.append(point[0])
-        y.append(point[1])
-        z.append(point[2])
-
-    # Plotting
-    standalone = ax is None
-    if standalone:
-        fig = plt.figure(figsize=(8, 6))
-        ax = fig.add_subplot(111, projection="3d")
-
-
-    # Outer court lines
-    ax.plot(
-        [-l/2, l/2, l/2, -l/2, -l/2],
-        [-w/2, -w/2, w/2, w/2, -w/2],
-        [0, 0, 0, 0, 0],
-        color="red",
-        linewidth=1,
-        label="Court Lines"
-    )
-
-    # Singles lines
-    ax.plot(
-        [-l/2, l/2],
-        [-sw/2, -sw/2],
-        [0, 0],
-        color="red",
-        linewidth=1,
-        label="Court Lines"
-    )
-
-    ax.plot(
-        [-l/2, l/2],
-        [sw/2, sw/2],
-        [0, 0],
-        color="red",
-        linewidth=1,
-        label="Court Lines"
-    )
-
-    # Net line (across X = 0)
-    ax.plot([0, 0], [-w/2, w/2], [0, 0], color="red", linewidth=1.5)
-
-    # Service lines
-    ax.plot(
-        [-sld, -sld],
-        [-w/2, w/2],
-        [0, 0],
-        color="red",
-        linewidth=1,
-    )
-    ax.plot(
-        [sld, sld],
-        [-w/2, w/2],
-        [0, 0],
-        color="red",
-        linewidth=1,
-    )
-
-    # Center Service Line (Connects the two service lines down the middle at Z = 0)
-    ax.plot(
-        [-sld, sld],
-        [0, 0],
-        [0, 0],
-        color="red",
-        linewidth=1,
-    )
-
-
-    # Plot trajectory
-    if fade_window is not None and len(x) > 1:
-        _plot_fading_line_3d(ax, x, z, y, fade_window, label="3D Trajectory")
-    else:
-        ax.plot(x, z, y, label="3D Trajectory", color="b", linewidth=2)
-
-    # Highlight start and end points
-    ax.scatter(x[0], z[0], y[0], color="green", s=50, label="Start")
-    ax.scatter(x[-1], z[-1], y[-1], color="red", s=50, label="End")
-
-    ax.set_xlim([-l/2 - 1, l/2 + 1])    
-    ax.set_ylim([-w/2 - 1, w/2 + 1])
-    ax.invert_yaxis() # This way negative values of z axis are towards the left
-    ax.set_zlim([0, 4]) 
-    ax.set_box_aspect([l, w, 4])
-
-    # NOTE: In matplotlib, +z is up; in the coordinates of the trajectory, +y is up
-    ax.set_xlabel("X Axis")
-    ax.set_ylabel("Z Axis")
-    ax.set_zlabel("Y Axis")
-    ax.set_title("3D Path Trajectory")
-    ax.grid(False)
-    ax.legend()
-
-    if standalone:
-        plt.show()
-
 if __name__ == "__main__":
+
     trajectory, end_time = generate_sample_trajectory()
 
     print(f"Num points in trajectory: {len(trajectory)}")
