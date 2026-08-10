@@ -1,50 +1,171 @@
 import copy
 from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
+from enum import Enum
 import math
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+class TrajectoryMode(Enum):
+    """
+    Modes supported by PhysicsSimulation.compute_3d_trajectory.
+    """
+    NO_BOUNCE = "no_bounce"        # stop as soon as the ball would touch the ground
+    BOUNCE_ONLY = "bounce_only"    # a single shot with up to max_bounces ground bounces
+    BOUNCE_AND_HIT = "bounce_and_hit"  # a multi-hit rally (ground bounces + racket hits)
+
 
 class PhysicsSimulation():
     """
     Class for simulating ball trajectories. The simulator's copy of the initial ball state will be modified in place.
     """
-    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), bounce_properties = BounceProperties(), environment_properties = EnvironmentProperties()):
+    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), bounce_properties = BounceProperties(), environment_properties = EnvironmentProperties(), rng: np.random.Generator = None):
         self.ball_state = copy.deepcopy(initial_state)
         self.ball_properties = ball_properties
         self.court_properties = court_properties
         self.bounce_properties = bounce_properties
         self.environment_properties = environment_properties
         self.timestep = simulation_timestep
+        self.rng = rng if rng is not None else np.random.default_rng()
 
-    def compute_3d_trajectory(self, bounces=True):
-        # TEMP: simulate for 10 seconds, break if y < 0 bounce physics and out of bounds TODO
-        n_bounces = 0
+
+    def compute_3d_trajectory(self, mode=TrajectoryMode.BOUNCE_ONLY, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, oob_buffer=3):
+        """
+        - num_hits_range, hit_zone_bounds, bounce_trigger_cap only apply to TrajectoryMode.BOUNCE_AND_HIT
+        - max_bounces only applies to TrajectoryMode.BOUNCE_ONLY.
+        - oob_buffer is the extra length in meters added to length and width of court before ball is considered out of bounds; applied to all modes
+        """
+        if mode == TrajectoryMode.NO_BOUNCE:
+            return self._compute_trajectory_no_bounce(oob_buffer=oob_buffer)
+        elif mode == TrajectoryMode.BOUNCE_ONLY:
+            return self._compute_trajectory_bounce_only(max_bounces=max_bounces, oob_buffer=oob_buffer)
+        elif mode == TrajectoryMode.BOUNCE_AND_HIT:
+            return self._compute_trajectory_bounce_and_hit(num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, oob_buffer=oob_buffer)
+
+
+    def _compute_trajectory_no_bounce(self, oob_buffer):
+        """
+        Stops when ball touches the ground or when it leaves the court bounds
+        """
         trajectory = []
         times = []
-        max_num_steps = int(10 / self.timestep)
-        for i in range(max_num_steps):
+        i = 0
+        while True:
+
             trajectory.append(self.ball_state.position.copy())
             times.append(i * self.timestep)
+
+            i += 1
             self._rk4_step()
-            y = self.ball_state.position[1]
+
+            x, y, z = self.ball_state.position
             if y <= 0:
-                if bounces:
-                    prev_x = self.ball_state.position[0]
-                    prev_z = self.ball_state.position[2]
-                    start_pos = np.array([prev_x, 0, prev_z])
-                    self.ball_state.position = start_pos
-                    vf, wf = self._compute_bounce()
-                    n_bounces += 1
+                break
+
+            out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
+            if out_of_bounds:
+                break
+
+        return np.array(trajectory), np.array(times)
+
+
+    def _compute_trajectory_bounce_only(self, max_bounces, oob_buffer):
+        """
+        Stops after max_bounces bounces or when ball leaves the court bounds
+        """
+        trajectory = []
+        times = []
+        n_bounces = 0
+        i = 0
+        while True:
+
+            trajectory.append(self.ball_state.position.copy())
+            times.append(i * self.timestep)
+
+            i += 1
+            self._rk4_step()
+
+            x, y, z = self.ball_state.position
+            if y <= 0:
+                self.ball_state.position = np.array([x, 0, z])
+                vf, wf = self._compute_bounce()
+                self.ball_state.velocity = vf
+                self.ball_state.spin = wf
+                n_bounces += 1
+
+            out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
+            if n_bounces == max_bounces or out_of_bounds:
+                break
+
+        return np.array(trajectory), np.array(times)
+
+
+    def _compute_trajectory_bounce_and_hit(self, num_hits_range, hit_zone_bounds, bounce_trigger_cap, oob_buffer):
+        """
+        - Ball hit once the its position reaches the hit_zone_bounds fraction of the court length, or after bounce_trigger_cap bounces without reaching that zone
+        - Num hits of the rally is sampled once from num_hits_range; stops after that num of hits has occurred, once the ball lands
+        - Also stops if ball goes out of bounds
+        """
+        target_hits = int(self.rng.integers(num_hits_range[0], num_hits_range[1] + 1))
+        num_hits = 0
+        bounces_since_last_hit = 0
+        l = self.court_properties.court_length
+
+        start_x = self.ball_state.position[0]
+        leg_start_sign = math.copysign(1.0, start_x) if start_x != 0 else 1.0
+
+        trajectory = []
+        times = []
+        i = 0
+        while True:
+
+            trajectory.append(self.ball_state.position.copy())
+            times.append(i * self.timestep)
+
+            i += 1
+            self._rk4_step()
+
+            x, y, z = self.ball_state.position
+
+            landed = (y <= 0)
+            if landed:
+                self.ball_state.position = np.array([x, 0, z])
+
+            if num_hits < target_hits:
+
+                crossed_into_far_side = (x != 0 and math.copysign(1.0, x) == -leg_start_sign)
+                in_hit_zone = (crossed_into_far_side and (hit_zone_bounds[0] * l <= abs(x) <= hit_zone_bounds[1] * l))
+
+                bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= bounce_trigger_cap)
+
+                if in_hit_zone or bounce_trigger_cap_reached:
+                    vf, wf = self._simulate_racket_hit()
                     self.ball_state.velocity = vf
                     self.ball_state.spin = wf
-                else:
-                    break
-            
 
-            out_of_bounds = (abs(self.ball_state.position[0]) > self.court_properties.court_length/2 + 3 or abs(self.ball_state.position[2]) > self.court_properties.court_width/2 + 3)
-            if n_bounces == 4 or out_of_bounds:
+                    num_hits += 1
+                    bounces_since_last_hit = 0
+
+                    leg_start_sign = math.copysign(1.0, x) if x != 0 else leg_start_sign
+
+                elif landed:
+                    vf, wf = self._compute_bounce()
+                    self.ball_state.velocity = vf
+                    self.ball_state.spin = wf
+
+                    bounces_since_last_hit += 1
+
+            elif landed:
+                vf, wf = self._compute_bounce()
+                self.ball_state.velocity = vf
+                self.ball_state.spin = wf
+
+            out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
+            if num_hits >= target_hits and landed:
                 break
-            
+            if out_of_bounds:
+                break
+
         return np.array(trajectory), np.array(times)
 
 
@@ -59,11 +180,24 @@ class PhysicsSimulation():
         rho = self.environment_properties.rho
         mu = self.environment_properties.mu
 
+        eps = 1e-9 # Prevent division by 0
+
         F_g = m * np.array([0, -g_scalar, 0])
         F_d = -0.5 * C_d * rho * A * np.linalg.norm(v) * v
-        F_m = 0.5 * C_l * rho * A * np.linalg.norm(v)**2 * (np.cross(w, v) / np.linalg.norm(np.cross(w, v)))
-        tau_d = -0.5 * C_m * rho * A * np.linalg.norm(v)**2 * (w / np.linalg.norm(w))
-        
+
+        cross_wv = np.cross(w, v)
+        cross_wv_norm = np.linalg.norm(cross_wv)
+        if cross_wv_norm > eps:
+            F_m = 0.5 * C_l * rho * A * np.linalg.norm(v)**2 * (cross_wv / cross_wv_norm)
+        else:
+            F_m = np.zeros(3)
+
+        w_norm = np.linalg.norm(w)
+        if w_norm > eps:
+            tau_d = -0.5 * C_m * rho * A * np.linalg.norm(v)**2 * (w / w_norm)
+        else:
+            tau_d = np.zeros(3)
+
         a_net = (F_g + F_d + F_m) / m
         alpha_net = tau_d / I
         return a_net, alpha_net
@@ -128,6 +262,93 @@ class PhysicsSimulation():
         w_f = np.array([w_fx, w_fy, w_fz])
 
         return v_f, w_f
+    
+
+    def _predict_landing(self, position, velocity, spin, dt=0.01, max_time=10.0):
+        """
+        - Cheap forward-Euler simulation starting from some state to estimate where ball will land
+        - Returns x, z (coords of landing) if ball landed within max_time else None
+        """
+        pos = np.array(position, dtype=float)
+        v = np.array(velocity, dtype=float)
+        w = np.array(spin, dtype=float)
+        t = 0.0
+        while t < max_time:
+            prev_pos = pos
+            a, alpha = self._compute_accelerations(v, w)
+
+            pos += v * dt
+            v += a * dt
+            w += alpha * dt
+            t += dt
+
+            if pos[1] <= 0.0 and prev_pos[1] > 0.0: # Linear interpolation to estimate exact bounce position
+                frac = prev_pos[1] / (prev_pos[1] - pos[1])
+                x_land = prev_pos[0] + frac * (pos[0] - prev_pos[0])
+                z_land = prev_pos[2] + frac * (pos[2] - prev_pos[2])
+                return x_land, z_land
+            
+        return None
+
+
+    def _simulate_racket_hit(self, max_attempts=20):
+        """
+        - Samples a random v and w that sends the ball back toward the other side of the court, rejecting candidates that wouldn't land in bounds (validated via a rough forward-Euler rollout); falls back to a deterministic safe shot ignoring drag/spin if no random candidate is accepted
+        - Returns v_f, w_f
+        """
+        court_properties = self.court_properties
+        l = court_properties.court_length
+        w_court = court_properties.court_width
+
+        hit_pos = self.ball_state.position
+        hit_v = self.ball_state.velocity
+
+        if hit_pos[0] != 0:
+            target_sign = -math.copysign(1.0, hit_pos[0])
+        elif hit_v[0] != 0:
+            target_sign = -math.copysign(1.0, hit_v[0])
+        else:
+            target_sign = 1.0
+
+        v_low = np.array([10.0, 3.0, -8.0]) # TODO: Use same bounds as used in generate random trajectory
+        v_high = np.array([30.0, 10.0, 8.0])
+
+        w_low = np.array([-400.0, -400.0, -400.0])
+        w_high = np.array([400.0, 400.0, 400.0])
+
+        for _ in range(max_attempts):
+
+            v_candidate = self.rng.uniform(v_low, v_high)
+            v_candidate[0] = target_sign * v_candidate[0]
+
+            w_candidate = self.rng.uniform(w_low, w_high)
+
+            landing = self._predict_landing(hit_pos, v_candidate, w_candidate)
+            if landing is None:
+                continue
+            x_land, z_land = landing
+
+            in_bounds = (abs(x_land) <= l / 2 and abs(z_land) <= w_court / 2)
+            correct_side = ((x_land == 0) or (math.copysign(1.0, x_land) == target_sign))
+
+            if in_bounds and correct_side:
+                return v_candidate, w_candidate
+
+        # Simplified deterministic fallback; aim well inside the court on the target side so land pos is highly likely to be in bounds when spin & drag are taken into account
+        x_target = target_sign * (l / 4)
+        z_target = 0.0
+        flight_time = 1.0 # Arbitrarily choosen
+        g = self.environment_properties.g
+
+        # f denotes the final velocity after the hit, not the final landing velocity; it's actually initial velocity for the quadratic equation
+        v_fx = (x_target - hit_pos[0]) / flight_time
+        v_fz = (z_target - hit_pos[2]) / flight_time
+        v_fy = 0.5 * g * flight_time  # y(t) = v_fy*t - 0.5*g*t^2 = 0
+
+        v_f = np.array([v_fx, v_fy, v_fz])
+        w_f = np.array([0.0, 1.0, 0.0])
+
+        return v_f, w_f
 
 
     
@@ -183,7 +404,14 @@ class PhysicsSimulation():
 
 
 
-def generate_sample_trajectory(timestep=0.001, bounces=True):
+def _resolve_trajectory_mode(bounces, racket_hits):
+    if not bounces:
+        return TrajectoryMode.NO_BOUNCE
+    
+    return TrajectoryMode.BOUNCE_AND_HIT if racket_hits else TrajectoryMode.BOUNCE_ONLY
+
+
+def generate_sample_trajectory(timestep=0.001, bounces=True, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, rng: np.random.Generator = None):
     court_properties = CourtProperties()
     l = court_properties.court_length
     w = court_properties.court_width
@@ -191,17 +419,18 @@ def generate_sample_trajectory(timestep=0.001, bounces=True):
     v_i = np.array([20, 7, 5]).astype(float)
     spin_i = np.array([0, 300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s left sidespin; exaggerated to show spin effects
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
-    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep)
-    return simulation.compute_3d_trajectory(bounces=bounces) # trajectory, end_time
+    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep, rng=rng)
+    mode = _resolve_trajectory_mode(bounces, racket_hits)
+    return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, end_time
 
 
-def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces=True, position_bounds=None, velocity_bounds=None, spin_bounds=None):
+def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces=True, position_bounds=None, velocity_bounds=None, spin_bounds=None, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4):
     """
     Same as generate_sample_trajectory, but the initial ball state is sampled at random
-    (via rng) within position_bounds/velocity_bounds/spin_bounds instead of being hardcoded.
 
     - Each bounds argument is a pair (low, high) where low and high are length-3 ndarrays
-    - Defaults are centered around the same values used by generate_sample_trajectory.
+    - Defaults are centered around the same values used by generate_sample_trajectory
+    - The same rng drives both the initial state sampling here and the in-rally racket hit sampling inside PhysicsSimulation (if racket_hits=True)
     """
     court_properties = CourtProperties()
     l = court_properties.court_length
@@ -219,9 +448,10 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces
     spin_i = rng.uniform(spin_bounds[0], spin_bounds[1]).astype(float)
 
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
-    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep)
-    
-    return simulation.compute_3d_trajectory(bounces=bounces) # trajectory, times
+    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep, rng=rng)
+
+    mode = _resolve_trajectory_mode(bounces, racket_hits)
+    return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times
 
 
 def plot_3d_trajectory(trajectory, ax=None):

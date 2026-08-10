@@ -6,7 +6,7 @@ from projection_component_paths import Paths
 import projector as proj
 
 
-def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, timestep=0.01, bounces=True):
+def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, timestep=0.01, bounces=True, hits=True):
     """
     Generates a synthetic dataset of (camera config, 3D trajectory, 2D projected trajectory) instances.
 
@@ -38,7 +38,7 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
 
         for trajectory_id in range(trajectories_per_config):
 
-            trajectory, times = generate_random_trajectory(rng, timestep=timestep, bounces=bounces)
+            trajectory, times = generate_random_trajectory(rng, timestep=timestep, bounces=bounces, racket_hits=hits)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
 
             example_id = f"camera_config_{camera_config_id:04d}__trajectory_{trajectory_id:04d}"
@@ -62,6 +62,7 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
                 "num_points": len(trajectory),
                 "timestep": timestep,
                 "bounces": bounces,
+                "hits": hits
             })
 
     df = pd.DataFrame(rows)
