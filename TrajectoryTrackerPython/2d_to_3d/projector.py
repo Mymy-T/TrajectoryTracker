@@ -3,6 +3,7 @@ from data_models import CourtProperties
 from enum import Enum
 import json
 from manual_keypoint_labeler import obtain_keypoints
+from matplotlib.collections import LineCollection
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -165,7 +166,32 @@ def project_trajectory_to_2d(trajectory: np.ndarray, projection_matrix: np.ndarr
     return np.stack(projected_trajectory, axis=0)
 
 
-def plot_2d_trajectory(trajectory, ax=None):
+def _plot_fading_line_2d(ax, x, y, fade_window, label=None, color=(0.0, 0.0, 1.0)):
+    """
+    The newest segment is fully opaque; opacity ramps down linearly over the trailing fade_window points, and anything older than fade_window points back is omitted entirely
+    """
+    n_points = len(x)
+    start_index = max(0, n_points - 1 - int(round(fade_window)))
+
+    xs = np.asarray(x[start_index:])
+    ys = np.asarray(y[start_index:])
+    if len(xs) < 2:
+        return
+
+    points = np.array([xs, ys]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+    # age (in points) of each segment's newer endpoint; 0 = the current/newest frame
+    newest_index = n_points - 1
+    segment_end_indices = start_index + np.arange(1, len(segments) + 1)
+    ages = newest_index - segment_end_indices
+    alphas = np.clip(1.0 - ages / fade_window, 0.0, 1.0) if fade_window > 0 else np.ones(len(segments))
+
+    colors = [(*color, a) for a in alphas]
+    ax.add_collection(LineCollection(segments, colors=colors, linewidth=2, label=label))
+
+
+def plot_2d_trajectory(trajectory, ax=None, fade_window=None):
     """
     If ax is None, creates a new figure/axes and calls plt.show() at the end (standalone use);
     else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
@@ -182,7 +208,10 @@ def plot_2d_trajectory(trajectory, ax=None):
     if standalone:
         fig, ax = plt.subplots(figsize=(8, 6))
 
-    ax.plot(x, y, label="Projected 2D Trajectory", color="b", linewidth=2)
+    if fade_window is not None and len(x) > 1:
+        _plot_fading_line_2d(ax, x, y, fade_window, label="Projected 2D Trajectory")
+    else:
+        ax.plot(x, y, label="Projected 2D Trajectory", color="b", linewidth=2)
 
     # Highlight start and end points
     ax.scatter(x[0], y[0], color="green", s=50, label="Start")

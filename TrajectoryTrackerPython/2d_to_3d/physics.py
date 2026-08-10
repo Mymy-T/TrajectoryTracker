@@ -3,6 +3,7 @@ from data_models import BallState, BallProperties, BounceProperties, CourtProper
 from enum import Enum
 import math
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import numpy as np
 
 
@@ -454,7 +455,33 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces
     return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times
 
 
-def plot_3d_trajectory(trajectory, ax=None):
+def _plot_fading_line_3d(ax, plot_x, plot_y, plot_z, fade_window, label=None, color=(0.0, 0.0, 1.0)):
+    """
+    The newest segment is fully opaque; opacity ramps down linearly over the trailing fade_window points, and anything older than fade_window points back is omitted entirely
+    """
+    n_points = len(plot_x)
+    start_index = max(0, n_points - 1 - int(round(fade_window)))
+
+    x = np.asarray(plot_x[start_index:])
+    y = np.asarray(plot_y[start_index:])
+    z = np.asarray(plot_z[start_index:])
+    if len(x) < 2:
+        return
+
+    points = np.array([x, y, z]).T.reshape(-1, 1, 3)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+    # age (in points) of each segment's newer endpoint; 0 = the current/newest frame
+    newest_index = n_points - 1
+    segment_end_indices = start_index + np.arange(1, len(segments) + 1)
+    ages = newest_index - segment_end_indices
+    alphas = np.clip(1.0 - ages / fade_window, 0.0, 1.0) if fade_window > 0 else np.ones(len(segments))
+
+    colors = [(*color, a) for a in alphas]
+    ax.add_collection3d(Line3DCollection(segments, colors=colors, linewidth=2, label=label))
+
+
+def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
     """
     If ax is None, creates a new figure/3D axes and calls plt.show() at the end (standalone use);
     else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
@@ -465,7 +492,6 @@ def plot_3d_trajectory(trajectory, ax=None):
     sw = court_properties.singles_width
     sld = court_properties.service_line_dist_from_net
 
-    # t = np.linspace(0, end_time, int(10/0.001))
     x = []
     y = []
     z = []
@@ -540,7 +566,10 @@ def plot_3d_trajectory(trajectory, ax=None):
 
 
     # Plot trajectory
-    ax.plot(x, z, y, label="3D Trajectory", color="b", linewidth=2)
+    if fade_window is not None and len(x) > 1:
+        _plot_fading_line_3d(ax, x, z, y, fade_window, label="3D Trajectory")
+    else:
+        ax.plot(x, z, y, label="3D Trajectory", color="b", linewidth=2)
 
     # Highlight start and end points
     ax.scatter(x[0], z[0], y[0], color="green", s=50, label="Start")

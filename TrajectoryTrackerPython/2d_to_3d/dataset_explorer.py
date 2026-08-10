@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import os
 import pandas as pd
+import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -13,6 +14,11 @@ import projector as proj
 
 DISPLAY_IMAGE_SIZE = (640, 360) # (width, height); matches the resolution real inference video frames are resized to
 RENDER_DEBOUNCE_MS = 80 # delay before rendering a tree selection, so rapid clicking only renders the settled-on item
+
+PLAYBACK_INTERVAL_MS = 15
+SLIDER_THROTTLE_MS = 60 # cap redraw rate while dragging the frame slider, for the same reason
+
+FADE_TRAIL_SECONDS = 0.5 # how much recent trajectory history "Fade trail" keeps visible before it's fully faded out
 
 
 def _dataset_csv_path(paths: Paths):
@@ -35,13 +41,29 @@ class DatasetExplorerApp(tk.Tk):
         self.df = None
         self._pending_render_after_id = None
 
-        # Base camera config that every row's camera config is a jittered sample of (see
-        # projector.sample_camera_config), cached once for the "difference from baseline" panel.
+        self.video_mode = tk.BooleanVar(value=False)
+        self.fade_mode = tk.BooleanVar(value=False)
+        self._anim_after_id = None
+        self._anim_frame_idx = 0
+        self._last_tick_time = None
+        self._current_trajectory_row = None
+        self._current_trajectory_3d = None
+        self._current_trajectory_2d = None
+        self._current_trajectory_2d_small = None
+        self._fade_window_frames = None # FADE_TRAIL_SECONDS converted to a frame count using the current trajectory's own timestep
+
+        # fig_2d's layout (fixed axis ranges/labels/legend) doesn't change between frames, so tight_layout() only needs to run once rather than on every redraw (see _draw_frame)
+        self._layout_initialized = False
+
+        self._last_drawn_frame_idx = -1
+        self._pending_slider_after_id = None
+        self._pending_slider_idx = 0
+
+        # Base camera config that every row's camera config is a jittered sample of (see projector.sample_camera_config), cached once for the "difference from baseline" panel
         self.base_intrinsics, self.base_extrinsics = proj.get_base_camera_config()
         self.base_camera_position = _camera_position_from_extrinsics(self.base_extrinsics)
 
-        # The sample court image is only ever used at DISPLAY_IMAGE_SIZE resolution here, so it's
-        # loaded and downsized once instead of being re-read/re-decoded from disk on every click.
+        # The sample court image is only ever used at DISPLAY_IMAGE_SIZE resolution here, so it's loaded and downsized once instead of being re-read/re-decoded from disk on every click
         full_image = cv2.imread(self.paths.sample_image_path)
         self._base_image_small = cv2.resize(full_image, DISPLAY_IMAGE_SIZE)
 
@@ -69,8 +91,33 @@ class DatasetExplorerApp(tk.Tk):
         right_frame = ttk.Frame(self)
         right_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        self.status_label = ttk.Label(right_frame, text="", foreground="blue")
-        self.status_label.pack(side=tk.TOP, anchor=tk.W)
+        status_frame = ttk.Frame(right_frame)
+        status_frame.pack(side=tk.TOP, fill=tk.X)
+
+        self.status_label = ttk.Label(status_frame, text="", foreground="blue")
+        self.status_label.pack(side=tk.LEFT, anchor=tk.W)
+
+        video_toggle = ttk.Checkbutton(status_frame, text="Play as video", variable=self.video_mode, command=self._on_video_mode_toggle)
+        video_toggle.pack(side=tk.RIGHT)
+
+        fade_toggle = ttk.Checkbutton(status_frame, text="Fade trail", variable=self.fade_mode, command=self._on_fade_mode_toggle)
+        fade_toggle.pack(side=tk.RIGHT)
+
+        playback_frame = ttk.Frame(right_frame)
+        playback_frame.pack(side=tk.TOP, fill=tk.X, pady=(4, 0))
+
+        ttk.Label(playback_frame, text="Frame:").pack(side=tk.LEFT)
+
+        self.frame_slider_var = tk.DoubleVar(value=0)
+        self.frame_slider = ttk.Scale(playback_frame, from_=0, to=0, orient=tk.HORIZONTAL,
+                                       variable=self.frame_slider_var, command=self._on_slider_drag)
+        self.frame_slider.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 4))
+        self.frame_slider.bind("<ButtonPress-1>", self._on_slider_press)
+        self.frame_slider.bind("<ButtonRelease-1>", self._on_slider_release)
+        self.frame_slider.state(["disabled"])
+
+        self.frame_counter_label = ttk.Label(playback_frame, text="- / -", width=12)
+        self.frame_counter_label.pack(side=tk.LEFT)
 
         plots_frame = ttk.Frame(right_frame)
         plots_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
@@ -122,8 +169,13 @@ class DatasetExplorerApp(tk.Tk):
         if not selected:
             return
 
-        # Debounce: rapid clicking through several tree items should only render the one the
-        # user actually settles on, not every intermediate selection.
+
+        if self.video_mode.get():
+            self.video_mode.set(False)
+            self._cancel_animation()
+            self._cancel_pending_slider_redraw()
+
+        # Debounce: rapid clicking through several tree items should only render the one the user actually settles on, not every intermediate selection
         if self._pending_render_after_id is not None:
             self.after_cancel(self._pending_render_after_id)
         self._pending_render_after_id = self.after(RENDER_DEBOUNCE_MS, self._render_selection, selected[0])
@@ -148,36 +200,159 @@ class DatasetExplorerApp(tk.Tk):
             self._render_trajectory(row)
             self._update_metadata(row, camera_position, has_trajectory=True)
         else:
+            self._cancel_animation()
+            self._cancel_pending_slider_redraw()
+            self._current_trajectory_row = None
+            self._set_slider_enabled(False)
+            self.frame_slider.config(to=0)
+            self.frame_slider_var.set(0)
+            self.frame_counter_label.config(text="- / -")
             self._update_metadata(first_row, camera_position, has_trajectory=False)
 
         self._update_diff_metadata(first_row, camera_position)
-        self.update_idletasks() # flush the draw_idle() redraws scheduled above before clearing the status
+        self.update_idletasks() # force the "Rendering…" text to clear right away rather than on the next idle tick
         self.status_label.config(text="")
 
     def _render_trajectory(self, row):
-        trajectory_3d = np.load(row.trajectory_3d_path)
+        self._cancel_animation()
+        self._cancel_pending_slider_redraw()
+
+        self._current_trajectory_row = row
+        self._current_trajectory_3d = np.load(row.trajectory_3d_path)
         trajectory_2d = np.load(row.trajectory_2d_path)
-
-        self.ax_3d.clear()
-        plot_3d_trajectory(trajectory_3d, ax=self.ax_3d)
-        self.canvas_3d.draw_idle()
-
-        self.ax_2d_plot.clear()
-        proj.plot_2d_trajectory(trajectory_2d, ax=self.ax_2d_plot)
+        self._current_trajectory_2d = trajectory_2d
 
         # Scale projected points down to the cached small overlay image's resolution.
         scale = np.array([self._base_image_small.shape[1] / 1920, self._base_image_small.shape[0] / 1080])
-        trajectory_2d_small = trajectory_2d * scale
+        self._current_trajectory_2d_small = trajectory_2d * scale
 
-        overlay_img = overlay_trajectory_on_image(self.paths.sample_image_path, trajectory_2d_small, output_path=None, base_image=self._base_image_small)
+        timestep = float(row.timestep)
+        self._fade_window_frames = max(1, round(FADE_TRAIL_SECONDS / timestep)) if timestep > 0 else None
+
+        num_points = len(self._current_trajectory_3d)
+        self.frame_slider.config(to=max(0, num_points - 1))
+        self._set_slider_enabled(True)
+
+        if self.video_mode.get():
+            self._start_animation()
+        else:
+            self._draw_frame(num_points - 1)
+
+    def _draw_frame(self, frame_idx):
+        traj_3d = self._current_trajectory_3d[:frame_idx + 1]
+        traj_2d = self._current_trajectory_2d[:frame_idx + 1]
+        traj_2d_small = self._current_trajectory_2d_small[:frame_idx + 1]
+        fade_window = self._fade_window_frames if self.fade_mode.get() else None
+
+        self.ax_3d.clear()
+        plot_3d_trajectory(traj_3d, ax=self.ax_3d, fade_window=fade_window)
+
+        self.ax_2d_plot.clear()
+        proj.plot_2d_trajectory(traj_2d, ax=self.ax_2d_plot, fade_window=fade_window)
+
+        overlay_img = overlay_trajectory_on_image(self.paths.sample_image_path, traj_2d_small, output_path=None, base_image=self._base_image_small, fade_window=fade_window)
         self.ax_2d_overlay.clear()
         if overlay_img is not None:
             self.ax_2d_overlay.imshow(overlay_img[:, :, ::-1]) # BGR -> RGB
         self.ax_2d_overlay.set_title("Overlaid on sample image")
         self.ax_2d_overlay.axis("off")
 
-        self.fig_2d.tight_layout()
-        self.canvas_2d.draw_idle()
+
+        if not self._layout_initialized:
+            self.fig_2d.tight_layout()
+            self._layout_initialized = True
+
+        self.canvas_3d.draw()
+        self.canvas_2d.draw()
+
+        self._last_drawn_frame_idx = frame_idx
+        self.frame_slider_var.set(frame_idx)
+        num_points = len(self._current_trajectory_3d)
+        self.frame_counter_label.config(text=f"{frame_idx} / {num_points - 1}")
+
+    def _on_video_mode_toggle(self):
+        self._cancel_animation()
+        self._cancel_pending_slider_redraw()
+        if self._current_trajectory_row is None:
+            return
+
+        if self.video_mode.get():
+            self._start_animation()
+        else:
+            self._draw_frame(len(self._current_trajectory_3d) - 1)
+
+    def _on_fade_mode_toggle(self):
+        if self._current_trajectory_row is not None:
+            self._draw_frame(self._last_drawn_frame_idx)
+
+    def _set_slider_enabled(self, enabled: bool):
+        self.frame_slider.state(["!disabled"] if enabled else ["disabled"])
+
+    def _on_slider_press(self, event):
+        self._cancel_animation()
+
+    def _on_slider_drag(self, value_str):
+        if self._current_trajectory_row is None:
+            return
+
+        new_idx = int(round(float(value_str)))
+        if new_idx == self._last_drawn_frame_idx:
+            return # this call is _draw_frame syncing the slider's own position, not a user drag
+
+        self._pending_slider_idx = new_idx
+        if self._pending_slider_after_id is None:
+            self._pending_slider_after_id = self.after(SLIDER_THROTTLE_MS, self._flush_slider_drag)
+
+    def _flush_slider_drag(self):
+        self._pending_slider_after_id = None
+        self._anim_frame_idx = self._pending_slider_idx
+        self._draw_frame(self._pending_slider_idx)
+
+    def _cancel_pending_slider_redraw(self):
+        if self._pending_slider_after_id is not None:
+            self.after_cancel(self._pending_slider_after_id)
+            self._pending_slider_after_id = None
+
+    def _on_slider_release(self, event):
+        if self._pending_slider_after_id is not None:
+            self._cancel_pending_slider_redraw()
+            self._anim_frame_idx = self._pending_slider_idx
+            self._draw_frame(self._pending_slider_idx)
+
+        # Resume playback from wherever the user scrubbed to, rather than restarting from frame 0.
+        if self.video_mode.get() and self._current_trajectory_row is not None:
+            self._start_animation(reset_to_start=False)
+
+    def _cancel_animation(self):
+        if self._anim_after_id is not None:
+            self.after_cancel(self._anim_after_id)
+            self._anim_after_id = None
+
+    def _start_animation(self, reset_to_start=True):
+        self._cancel_animation()
+        if self._current_trajectory_row is None:
+            return
+
+        if reset_to_start:
+            self._anim_frame_idx = 0
+        self._last_tick_time = time.perf_counter()
+        self._animation_step()
+
+    def _animation_step(self):
+        self._draw_frame(self._anim_frame_idx)
+
+        now = time.perf_counter()
+        elapsed_ms = (now - self._last_tick_time) * 1000
+        self._last_tick_time = now
+
+        num_points = len(self._current_trajectory_3d)
+        timestep_ms = float(self._current_trajectory_row.timestep) * 1000
+        frames_to_advance = max(1, round(elapsed_ms / timestep_ms))
+        self._anim_frame_idx += frames_to_advance
+        if self._anim_frame_idx >= num_points:
+            self._anim_frame_idx = 0 # loop back to the start
+
+        self._anim_after_id = self.after(PLAYBACK_INTERVAL_MS, self._animation_step)
 
     def _update_metadata(self, row, camera_position, has_trajectory: bool):
         lines = [
