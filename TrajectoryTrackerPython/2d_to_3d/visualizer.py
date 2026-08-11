@@ -195,7 +195,7 @@ def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
         [-l/2, l/2, l/2, -l/2, -l/2],
         [-w/2, -w/2, w/2, w/2, -w/2],
         [0, 0, 0, 0, 0],
-        color="red",
+        color="green",
         linewidth=1,
         label="Court Lines"
     )
@@ -205,7 +205,7 @@ def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
         [-l/2, l/2],
         [-sw/2, -sw/2],
         [0, 0],
-        color="red",
+        color="green",
         linewidth=1,
         label="Court Lines"
     )
@@ -214,27 +214,27 @@ def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
         [-l/2, l/2],
         [sw/2, sw/2],
         [0, 0],
-        color="red",
+        color="green",
         linewidth=1,
         label="Court Lines"
     )
 
     # Net line (across X = 0)
-    ax.plot([0, 0], [-w/2, w/2], [0, 0], color="red", linewidth=1.5)
+    ax.plot([0, 0], [-w/2, w/2], [0, 0], color="green", linewidth=1.5)
 
     # Service lines
     ax.plot(
         [-sld, -sld],
         [-w/2, w/2],
         [0, 0],
-        color="red",
+        color="green",
         linewidth=1,
     )
     ax.plot(
         [sld, sld],
         [-w/2, w/2],
         [0, 0],
-        color="red",
+        color="green",
         linewidth=1,
     )
 
@@ -243,7 +243,7 @@ def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
         [-sld, sld],
         [0, 0],
         [0, 0],
-        color="red",
+        color="green",
         linewidth=1,
     )
 

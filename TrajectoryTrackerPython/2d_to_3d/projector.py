@@ -113,9 +113,12 @@ def homogenize(coords: np.ndarray):
 
 def dehomogenize(coords: np.ndarray):
     if coords.ndim == 1:
-        return coords[:-1] / coords[-1]
+        return coords[:-1] / coords[-1] if not np.isclose(coords[-1], 0, atol=1e-7) else coords[:-1] # Treat as direction if end coord is 0
     
-    return coords[:, :-1] / coords[:, -1:]
+    last_col = coords[:, -1:]
+    is_zero_mask = np.isclose(last_col, 0, atol=1e-7)
+    effective_final_coords = np.where(is_zero_mask, 1.0, last_col)
+    return coords[:, :-1] / effective_final_coords
 
 
 def create_projection_matrix(simplified_intrinsics: np.ndarray, extrinsics: np.ndarray):

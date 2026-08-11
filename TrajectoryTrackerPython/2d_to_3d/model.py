@@ -1,5 +1,72 @@
+import numpy as np
+from projector import dehomogenize
 import torch
 from torch import nn
+
+
+class TrajectoryReconstructionNetwork(nn.Module):
+
+    def __init__(self, intrinsics, extrinsics: np.ndarray): # intrinsics is 3 x 3; extrinsincs is 4 x 4
+        super().__init__()
+
+        self.intrinsics = intrinsics
+        self.extrinsics = extrinsics
+
+        self.eot_network = EOTNetwork()
+        self.height_network = HeightNetwork()
+        self.refinement_network = RefinementNetwork()
+    
+
+    def forward(self, x): # x is (N, L, 2); sequence of image coords
+        p = np.zeros((100, 50, 4)) # TODO: input parameterization
+        delta_p = np.zeros((100, 50, 4)) # TODO: input parameterization
+
+
+        eot_input = delta_p # (N, L, 4)
+        epsilons = self.eot_network(eot_input) # (N, L, 1)
+        heights = self.height_network(p, delta_p, epsilons) # (N, L, 1)
+        
+        coords = np.zeros(100, 50, 3) # TODO: find intersection of ray with height to get 3d coords
+
+        refinement_input = np.concatenate((coords, p), axis=-1) # (N, L, 7)
+        coord_deltas = self.refinement_network(refinement_input) # (N, L, 3)
+
+        final_coords = coords + coord_deltas
+
+        return final_coords # (N, L, 3)
+
+
+    def obtain_ray_representation(self, x):
+        """
+        x is (N, L, 2); sequence of image coords
+        Returns c, d; both of shapes (N, L, 3)
+        """
+        N = x.shape[0]
+        L = x.shape[1]
+        E_inv = np.linalg.inv(self.extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
+
+        c_single = dehomogenize(np.matmul(E_inv, np.array([0, 0, 0, 1]))) # (3,)
+        c = np.tile(c_single, (N, L, 1)) # (N, L, 3)
+
+        fx = self.intrinsics[0, 0]
+        fy = self.intrinsics[1, 1]
+        cx = self.intrinsics[2, 0]
+        cy = self.intrinsics[2, 1]
+        
+        d_X_cam = ((x[:, :, 0] - cx) / fx) # (N, L)
+        d_Y_cam = ((x[:, :, 1] - cy) / fy) # (N, L)
+        d_Z_cam = np.ones((N, L))
+        d_extra_cam = np.zeros((N, L))
+        d_cam = np.stack((d_X_cam, d_Y_cam, d_Z_cam, d_extra_cam), axis=-1) # (N, L, 4)
+        d_cam = np.expand_dims(d_cam, axis=-1) # (N, L, 4, 1)
+
+        # Squeeze because matmul final shape is (N, L, 4, 1); E_inv changes from (4, 4) to (N, L, 4, 4) by broadcasting
+        d = dehomogenize(np.matmul(E_inv, d_cam).squeeze(axis=-1)) # (N, L, 3)
+
+        return c, d
+
+
+
 
 class EOTNetwork(nn.Module):
 
@@ -135,7 +202,7 @@ class HeightNetwork(nn.Module):
 
     def forward(self, p, delta_p, epsilon): # p is (N, L, 4), delta_p is (N, L, 4), epsilon is (N, L, 1)
         L = p.shape[1]
-        times = torch.arange(L, dtype=p.dtype).view(1, L, 1) # zero-indexed, so perform t - 1 in weight computation isn't necessary
+        times = torch.arange(L, dtype=p.dtype).view(1, L, 1) # zero-indexed, so performing t-1 in weight computation isn't necessary
 
         lstm_f_input = torch.concatenate((delta_p, epsilon), dim=-1) # (N, L, 5); initial height feature added inside implmentation of HeightDeltaLSTM
         lstm_b_input = torch.flip(lstm_f_input, dims=1)
