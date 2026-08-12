@@ -18,15 +18,16 @@ class TrajectoryReconstructionNetwork(nn.Module):
     
 
     def forward(self, x): # x is (N, L, 2); sequence of image coords
-        p = np.zeros((100, 50, 4)) # TODO: input parameterization
-        delta_p = np.zeros((100, 50, 4)) # TODO: input parameterization
+        c, d = self.obtain_ray_representation(x)
+        p = self.obtain_intersection_representation(c, d) # (N, L, 4)
+        delta_p = np.zeros((100, 50, 4)) # TODO: differencing
 
 
         eot_input = delta_p # (N, L, 4)
         epsilons = self.eot_network(eot_input) # (N, L, 1)
         heights = self.height_network(p, delta_p, epsilons) # (N, L, 1)
         
-        coords = np.zeros(100, 50, 3) # TODO: find intersection of ray with height to get 3d coords
+        coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords
 
         refinement_input = np.concatenate((coords, p), axis=-1) # (N, L, 7)
         coord_deltas = self.refinement_network(refinement_input) # (N, L, 3)
@@ -36,7 +37,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         return final_coords # (N, L, 3)
 
 
-    def obtain_ray_representation(self, x):
+    def obtain_ray_representation(self, x: np.ndarray):
         """
         x is (N, L, 2); sequence of image coords
         Returns c, d; both of shapes (N, L, 3)
@@ -65,6 +66,44 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         return c, d
 
+
+    def obtain_intersection_representation(self, c: np.ndarray, d: np.ndarray): # c & d both (N, L, 3)
+        c_x = c[:, :, 0] # (N, L)
+        c_y = c[:, :, 1] # (N, L)
+        c_z = c[:, :, 2] # (N, L)
+
+        d_x = d[:, :, 0] # (N, L)
+        d_y = d[:, :, 1] # (N, L)
+        d_z = d[:, :, 2] # (N, L)
+
+
+        pg_x = c_x - c_y * (d_x / d_y) # (N, L)
+        pg_z = c_z - c_y * (d_z / d_y) # (N, L)
+        pv_y = c_y - c_x * (d_y / d_x) # (N, L)
+        pv_z = c_z - c_x * (d_z / d_x) # (N, L)
+
+        return np.stack((pg_x, pg_z, pv_y, pv_z), axis=-1) # (N, L, 4)
+
+
+    def obtain_coords_from_height(self, c: np.ndarray, d: np.ndarray, h: np.ndarray):
+        """
+        c & d are (N, L, 3)
+        h is (N, L, 1)
+        """
+        c_x = c[:, :, 0] # (N, L)
+        c_y = c[:, :, 1] # (N, L)
+        c_z = c[:, :, 2] # (N, L)
+
+        d_x = d[:, :, 0] # (N, L)
+        d_y = d[:, :, 1] # (N, L)
+        d_z = d[:, :, 2] # (N, L)
+
+        h = h.squeeze(axis=-1) # (N, L)
+
+        x = c_x + (h - c_y) * (d_x / d_y) # (N, L)
+        z = c_z + (h - c_y) * (d_z / d_y) # (N, L)
+
+        return np.stack((x, h, z), axis=-1) # (N, L, 3)
 
 
 
