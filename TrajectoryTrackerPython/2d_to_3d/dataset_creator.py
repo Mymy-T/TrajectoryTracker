@@ -1,9 +1,21 @@
 import numpy as np
 import os
 import pandas as pd
+from torch import full
 from physics import generate_random_trajectory
 from projection_component_paths import Paths
 import projector as proj
+
+
+def _remove_path_before(full_path, first_part_to_keep):
+    """
+    Takes in a full path. Removes all parent directories up to first_part_to_keep (which is still there after the final cut) to obtain a relative path
+    """
+    parts = full_path.split(os.sep)
+    
+    idx = parts.index(first_part_to_keep)
+    return os.sep.join(parts[idx:])
+
 
 
 def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, timestep=0.01, bounces=True, hits=True):
@@ -57,8 +69,8 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
                 "cx": intrinsics[0, 2],
                 "cy": intrinsics[1, 2],
                 **{f"extrinsics_{i}": v for i, v in enumerate(extrinsics.flatten())},
-                "trajectory_3d_path": trajectory_3d_path,
-                "trajectory_2d_path": trajectory_2d_path,
+                "trajectory_3d_path": _remove_path_before(full_path=trajectory_3d_path, first_part_to_keep="trajectories_3d"),
+                "trajectory_2d_path": _remove_path_before(full_path=trajectory_2d_path, first_part_to_keep="trajectories_2d"),
                 "num_points": len(trajectory),
                 "timestep": timestep,
                 "bounces": bounces,
