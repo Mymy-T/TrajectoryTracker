@@ -2,6 +2,64 @@ import numpy as np
 from projector import dehomogenize
 import torch
 from torch import nn
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+
+# TODO: Cleanup code to reuse projector.py, remove unecessary parts
+
+
+def _safe_divide(numerator, denominator, eps=1e-8):
+    sign = torch.where(denominator >= 0, 1.0, -1.0)
+    safe_denom = torch.where(denominator.abs() < eps, sign * eps, denominator)
+    return numerator / safe_denom
+
+
+def _build_validity_mask(lengths, max_len, remove_last_step=False):
+    """
+    - lengths is (N,)
+    Returns a (N, L) boolean tensor, False at all padded timesteps
+    """
+    positions = torch.arange(max_len, device=lengths.device).unsqueeze(0)  # (1, L)
+    lengths = lengths.unsqueeze(-1) # (N, 1)
+    return positions < (lengths if not remove_last_step else lengths - 1) # (N, L) from broadcasting; < due to zero indexing
+
+
+def _reverse_valid_prefix(x, lengths):
+    """
+    -  x is (N, L, D)
+    - lengths is (N,)
+    Returns reversed sequence, ignoring padding (which remains at end); applying twice returns original input
+    """
+    N, L, D = x.shape[0], x.shape[1], x.shape[2]
+
+    positions = torch.arange(L, device=x.device).unsqueeze(0).expand(N, L)  # (N, L)
+    lengths = lengths.to(x.device).unsqueeze(1)  # (N, 1)
+
+    reversed_positions = lengths - positions - 1 # These are indices of which element should be moved to the corresponding position
+
+    is_valid = positions < lengths
+    indices = torch.where(is_valid, reversed_positions, positions).unsqueeze(-1)  # (N, L, 1); padding stays at end
+    indices = indices.expand(-1, -1, D) # (N, L, D)
+
+    return torch.gather(x, dim=1, index=indices) # (N, L, D); looks up the corresponding reversed/padding indicies for the L dimension
+
+
+def _mask_out(x, mask):
+    """
+    Replaces padded positions with zero
+    - x is (N, L, D)
+    - mask is (N, L)
+    """
+    return torch.where(mask.unsqueeze(-1), x, torch.zeros_like(x))
+
+
+def _run_lstm_with_packing(lstm, x, lengths):
+    """
+    Returns a padded (N, L, hidden*2) tensor (from bidirectional lstm); uses Pytorch natural pack padding functionality
+    """
+    packed_in = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
+    packed_out, _ = lstm(packed_in)
+    out, _ = pad_packed_sequence(packed_out, batch_first=True, total_length=x.shape[1])
+    return out
 
 
 class TrajectoryReconstructionNetwork(nn.Module):
@@ -9,103 +67,104 @@ class TrajectoryReconstructionNetwork(nn.Module):
     def __init__(self, intrinsics, extrinsics: np.ndarray): # intrinsics is 3 x 3; extrinsincs is 4 x 4
         super().__init__()
 
-        self.intrinsics = intrinsics
-        self.extrinsics = extrinsics
+        self.register_buffer("intrinsics", torch.as_tensor(intrinsics, dtype=torch.float32))
+        self.register_buffer("extrinsics", torch.as_tensor(extrinsics, dtype=torch.float32))
 
         self.eot_network = EOTNetwork()
         self.height_network = HeightNetwork()
         self.refinement_network = RefinementNetwork()
-    
+
 
     def forward(self, x, lengths): # x is (N, L, 2); sequence of image coords; lengths is (N,)
+        x = x.to(dtype=self.intrinsics.dtype)
+        lengths = lengths.to(x.device)
+        L = x.shape[1]
+        mask = _build_validity_mask(lengths, L) # (N, L)
+
         c, d = self.obtain_ray_representation(x)
         p = self.obtain_intersection_representation(c, d) # (N, L, 4)
-       
-        delta_p = torch.zeros_like(p)
-        delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; last difference is just assumed to be 0
+        p = _mask_out(p, mask) # Zero out padded positions
 
+        delta_p = torch.zeros_like(p)
+        delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; (N, L, 4)
+        difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
+        delta_p = _mask_out(delta_p, difference_mask)
 
         eot_input = delta_p # (N, L, 4)
-        epsilons = self.eot_network(eot_input) # (N, L, 1)
-        heights = self.height_network(p, delta_p, epsilons) # (N, L, 1)
-        
+        epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
+        heights = self.height_network(p, delta_p, epsilons, lengths) # (N, L, 1)
+
         coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords
 
-        refinement_input = np.concatenate((coords, p), axis=-1) # (N, L, 7)
-        coord_deltas = self.refinement_network(refinement_input) # (N, L, 3)
+        refinement_input = torch.cat((coords, p), dim=-1) # (N, L, 7)
+        coord_deltas = self.refinement_network(refinement_input, lengths) # (N, L, 3)
 
         final_coords = coords + coord_deltas
+        final_coords = _mask_out(final_coords, mask)
+        epsilons = _mask_out(epsilons, mask)
 
-        return final_coords # (N, L, 3)
+        return final_coords, epsilons # (N, L, 3), (N, L, 1)
 
 
-    def obtain_ray_representation(self, x: np.ndarray):
+    def obtain_ray_representation(self, x: torch.Tensor):
         """
         x is (N, L, 2); sequence of image coords
         Returns c, d; both of shapes (N, L, 3)
         """
-        N = x.shape[0]
-        L = x.shape[1]
-        E_inv = np.linalg.inv(self.extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
+        N, L = x.shape[0], x.shape[1]
+        E_inv = torch.linalg.inv(self.extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
 
-        c_single = dehomogenize(np.matmul(E_inv, np.array([0, 0, 0, 1]))) # (3,)
-        c = np.tile(c_single, (N, L, 1)) # (N, L, 3)
+        origin_homogeneous = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=E_inv.dtype, device=E_inv.device)
+        c_single = dehomogenize(torch.matmul(E_inv, origin_homogeneous)) # (3,)
+        c = c_single.view(1, 1, 3).expand(N, L, 3) # (N, L, 3)
 
         fx = self.intrinsics[0, 0]
         fy = self.intrinsics[1, 1]
-        cx = self.intrinsics[2, 0]
-        cy = self.intrinsics[2, 1]
-        
-        d_X_cam = ((x[:, :, 0] - cx) / fx) # (N, L)
-        d_Y_cam = ((x[:, :, 1] - cy) / fy) # (N, L)
-        d_Z_cam = np.ones((N, L))
-        d_extra_cam = np.zeros((N, L))
-        d_cam = np.stack((d_X_cam, d_Y_cam, d_Z_cam, d_extra_cam), axis=-1) # (N, L, 4)
-        d_cam = np.expand_dims(d_cam, axis=-1) # (N, L, 4, 1)
+        cx = self.intrinsics[0, 2]
+        cy = self.intrinsics[1, 2]
+
+        d_X_cam = (x[:, :, 0] - cx) / fx # (N, L)
+        d_Y_cam = (x[:, :, 1] - cy) / fy # (N, L)
+        d_Z_cam = torch.ones((N, L), dtype=x.dtype, device=x.device)
+        d_extra_cam = torch.zeros((N, L), dtype=x.dtype, device=x.device) # Homogeneous direction coord
+        d_cam = torch.stack((d_X_cam, d_Y_cam, d_Z_cam, d_extra_cam), dim=-1) # (N, L, 4)
+        d_cam = d_cam.unsqueeze(-1) # (N, L, 4, 1)
 
         # Squeeze because matmul final shape is (N, L, 4, 1); E_inv changes from (4, 4) to (N, L, 4, 4) by broadcasting
-        d = dehomogenize(np.matmul(E_inv, d_cam).squeeze(axis=-1)) # (N, L, 3)
+        d = dehomogenize(torch.matmul(E_inv, d_cam).squeeze(-1)) # (N, L, 3)
 
         return c, d
 
 
-    def obtain_intersection_representation(self, c: np.ndarray, d: np.ndarray): # c & d both (N, L, 3)
-        c_x = c[:, :, 0] # (N, L)
-        c_y = c[:, :, 1] # (N, L)
-        c_z = c[:, :, 2] # (N, L)
+    def obtain_intersection_representation(self, c: torch.Tensor, d: torch.Tensor):
+        """
+        c & d both (N, L, 3)
+        """
+        c_x, c_y, c_z = c[:, :, 0], c[:, :, 1], c[:, :, 2] # (N, L)
+        d_x, d_y, d_z = d[:, :, 0], d[:, :, 1], d[:, :, 2] # (N, L)
 
-        d_x = d[:, :, 0] # (N, L)
-        d_y = d[:, :, 1] # (N, L)
-        d_z = d[:, :, 2] # (N, L)
+        pg_x = c_x - c_y * _safe_divide(d_x, d_y) # (N, L)
+        pg_z = c_z - c_y * _safe_divide(d_z, d_y) # (N, L)
+        pv_y = c_y - c_x * _safe_divide(d_y, d_x) # (N, L)
+        pv_z = c_z - c_x * _safe_divide(d_z, d_x) # (N, L)
 
-
-        pg_x = c_x - c_y * (d_x / d_y) # (N, L)
-        pg_z = c_z - c_y * (d_z / d_y) # (N, L)
-        pv_y = c_y - c_x * (d_y / d_x) # (N, L)
-        pv_z = c_z - c_x * (d_z / d_x) # (N, L)
-
-        return np.stack((pg_x, pg_z, pv_y, pv_z), axis=-1) # (N, L, 4)
+        return torch.stack((pg_x, pg_z, pv_y, pv_z), dim=-1) # (N, L, 4)
 
 
-    def obtain_coords_from_height(self, c: np.ndarray, d: np.ndarray, h: np.ndarray):
+    def obtain_coords_from_height(self, c: torch.Tensor, d: torch.Tensor, h: torch.Tensor):
         """
         c & d are (N, L, 3)
         h is (N, L, 1)
         """
-        c_x = c[:, :, 0] # (N, L)
-        c_y = c[:, :, 1] # (N, L)
-        c_z = c[:, :, 2] # (N, L)
+        c_x, c_y, c_z = c[:, :, 0], c[:, :, 1], c[:, :, 2] # (N, L)
+        d_x, d_y, d_z = d[:, :, 0], d[:, :, 1], d[:, :, 2] # (N, L)
 
-        d_x = d[:, :, 0] # (N, L)
-        d_y = d[:, :, 1] # (N, L)
-        d_z = d[:, :, 2] # (N, L)
+        h = h.squeeze(-1) # (N, L)
 
-        h = h.squeeze(axis=-1) # (N, L)
+        x = c_x + (h - c_y) * _safe_divide(d_x, d_y) # (N, L)
+        z = c_z + (h - c_y) * _safe_divide(d_z, d_y) # (N, L)
 
-        x = c_x + (h - c_y) * (d_x / d_y) # (N, L)
-        z = c_z + (h - c_y) * (d_z / d_y) # (N, L)
-
-        return np.stack((x, h, z), axis=-1) # (N, L, 3)
+        return torch.stack((x, h, z), dim=-1) # (N, L, 3)
 
 
 
@@ -134,15 +193,16 @@ class EOTNetwork(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, x): # x is (N, L, 4)
-        lstm_out_0, _ = self.lstm_0(x) # (N, L, 128)
-        lstm_out_1, _ = self.lstm_1(lstm_out_0) # (N, L, 128)
-        lstm_out_2, _ = self.lstm_2(lstm_out_1) # (N, L, 128)
+    def forward(self, x, lengths): # x is (N, L, 4); lengths is (N,)
+        lstm_out_0 = _run_lstm_with_packing(self.lstm_0, x, lengths) # (N, L, 128)
+        lstm_out_1 = _run_lstm_with_packing(self.lstm_1, lstm_out_0, lengths) # (N, L, 128)
+        lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         epsilons = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        
+        epsilons = _mask_out(epsilons, _build_validity_mask(lengths, x.shape[1]))
+
         return epsilons  # (N, L, 1)
-        
+
 
 class HeightDeltaLSTM(nn.Module):
 
@@ -171,7 +231,7 @@ class HeightDeltaLSTM(nn.Module):
     def forward(self, x_reduced): # x_reduced has shape (N, L, 5)
         N, L, _ = x_reduced.shape
 
-        h = torch.zeros((N, 1))
+        h = torch.zeros((N, 1), dtype=x_reduced.dtype, device=x_reduced.device)
 
         heights = []
 
@@ -185,13 +245,13 @@ class HeightDeltaLSTM(nn.Module):
 
             x_t, state_0 = self.lstm_0(x_t, state_0)
             x_t, state_1 = self.lstm_1(x_t, state_1)
-            x_t, state_2 = self.lstm_2(x_t, state_2) # x_t is now (B, 1, 64)
+            x_t, state_2 = self.lstm_2(x_t, state_2) # x_t is now (N, 1, 64)
 
             delta_h_t = self.fc_network(x_t) # (N, 1, 1)
             delta_h_t = delta_h_t.squeeze(1) # (N, 1)
 
             heights.append(h) # Assumes the initial height is 0
-            h += delta_h_t
+            h = h + delta_h_t # Avoid += to avoid mutating the tensor already referenced in heights
 
         heights_tensor = torch.stack(heights, dim=1) # (N, L, 1)
 
@@ -221,16 +281,17 @@ class HeightLSTM(nn.Module):
             nn.LeakyReLU(negative_slope=0.01),
             fc_3
         )
-    
-    def forward(self, x): # x has shape (N, L, 5)
-        lstm_out_0, _ = self.lstm_0(x) # (N, L, 128)
-        lstm_out_1, _ = self.lstm_1(lstm_out_0) # (N, L, 128)
-        lstm_out_2, _ = self.lstm_2(lstm_out_1) # (N, L, 128)
+
+    def forward(self, x, lengths): # x has shape (N, L, 5); lengths is (N,)
+        lstm_out_0 = _run_lstm_with_packing(self.lstm_0, x, lengths) # (N, L, 128)
+        lstm_out_1 = _run_lstm_with_packing(self.lstm_1, lstm_out_0, lengths) # (N, L, 128)
+        lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         h_refined = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        
+        h_refined = _mask_out(h_refined, _build_validity_mask(lengths, x.shape[1]))
+
         return h_refined  # (N, L, 1)
-    
+
 
 class HeightNetwork(nn.Module):
 
@@ -241,22 +302,23 @@ class HeightNetwork(nn.Module):
         self.lstm_b = HeightDeltaLSTM()
         self.lstm_height = HeightLSTM()
 
-    def forward(self, p, delta_p, epsilon): # p is (N, L, 4), delta_p is (N, L, 4), epsilon is (N, L, 1)
-        L = p.shape[1]
-        times = torch.arange(L, dtype=p.dtype).view(1, L, 1) # zero-indexed, so performing t-1 in weight computation isn't necessary
+    def forward(self, p, delta_p, epsilon, lengths): # p is (N, L, 4), delta_p is (N, L, 4), epsilon is (N, L, 1); lengths is (N,)
+        N, L = p.shape[0], p.shape[1]
 
         lstm_f_input = torch.concatenate((delta_p, epsilon), dim=-1) # (N, L, 5); initial height feature added inside implmentation of HeightDeltaLSTM
-        lstm_b_input = torch.flip(lstm_f_input, dims=1)
+        lstm_b_input = _reverse_valid_prefix(lstm_f_input, lengths)
 
         h_f = self.lstm_f(lstm_f_input) # (N, L, 1)
-        h_b = self.lstm_b(lstm_b_input) # Sequence is currently reversed and unable to be weighted properly to form h_t
-        h_b = torch.flip(h_b, dims=1) # (N, L, 1)
+        h_b = self.lstm_b(lstm_b_input) # (N, L, 1); accumulated in reversed order
+        h_b = _reverse_valid_prefix(h_b, lengths) # Reverse it again back to proper order
 
-        fb_weights = times / (L - 1) # (1, L, 1)
+        positions = torch.arange(L, device=p.device, dtype=p.dtype).unsqueeze(0) # (1, L); zero-indexed
+        denom = (lengths - 1).clamp(min=1).to(device=p.device, dtype=p.dtype).unsqueeze(1) # (N, 1); floored to avoid division by 0 for length 1 sequences
+        fb_weights = (positions / denom).unsqueeze(-1) # (N, L, 1); reaches 1.0 at each sequence end, ignoring padding
         h = (1 - fb_weights) * h_f + fb_weights * h_b # (N, L, 1)
 
         lstm_height_input = torch.concatenate((p, h), dim=-1)
-        h_refined = self.lstm_height(lstm_height_input) # (N, L, 1)
+        h_refined = self.lstm_height(lstm_height_input, lengths) # (N, L, 1)
 
         return h_refined  # (N, L, 1)
 
@@ -284,11 +346,12 @@ class RefinementNetwork(nn.Module):
             fc_3
         )
 
-    def forward(self, x): # x is (N, L, 7)
-        lstm_out_0, _ = self.lstm_0(x) # (N, L, 128)
-        lstm_out_1, _ = self.lstm_1(lstm_out_0) # (N, L, 128)
-        lstm_out_2, _ = self.lstm_2(lstm_out_1) # (N, L, 128)
+    def forward(self, x, lengths): # x is (N, L, 7); lengths is (N,)
+        lstm_out_0 = _run_lstm_with_packing(self.lstm_0, x, lengths) # (N, L, 128)
+        lstm_out_1 = _run_lstm_with_packing(self.lstm_1, lstm_out_0, lengths) # (N, L, 128)
+        lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         position_deltas = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 3); add residual from lstm_0
-        
+        position_deltas = _mask_out(position_deltas, _build_validity_mask(lengths, x.shape[1]))
+
         return position_deltas  # (N, L, 3)

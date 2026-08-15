@@ -16,7 +16,7 @@ class DatasetType(Enum):
 def homogenize_seq_length(batch):
     inputs, outputs = zip(*batch) # [(x1, y1), (x2, y2), ...] -> [(x1, x2, ...), (y1, y2, ...)]
 
-    lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths
+    lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths; (N,)
     
     padded_inputs = pad_sequence(inputs, batch_first=True, padding_value=0.0)
     padded_outputs = pad_sequence(outputs, batch_first=True, padding_value=0.0)

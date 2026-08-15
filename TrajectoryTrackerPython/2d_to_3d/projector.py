@@ -7,6 +7,7 @@ import numpy as np
 import os
 from projection_component_paths import Paths
 from physics import generate_sample_trajectory
+import torch
 from visualizer import overlay_trajectory_on_image, plot_2d_trajectory
 
 class WorldCoordSet(Enum):
@@ -111,14 +112,30 @@ def homogenize(coords: np.ndarray):
     return np.concatenate((coords, ones), axis=1)
 
 
-def dehomogenize(coords: np.ndarray):
-    if coords.ndim == 1:
-        return coords[:-1] / coords[-1] if not np.isclose(coords[-1], 0, atol=1e-7) else coords[:-1] # Treat as direction if end coord is 0
+def dehomogenize(coords):
+    """
+    coords is either a numpy ndarray or a torch tensor
+    """
+
+    is_numpy = isinstance(coords, np.ndarray)
+
+    if is_numpy:
+        tensor_coords = torch.from_numpy(coords)
+    else:
+        tensor_coords = coords
+
+    if tensor_coords.ndim == 1:
+        end_is_zero = torch.isclose(tensor_coords[-1], torch.tensor(0.0, dtype=tensor_coords.dtype, device=tensor_coords.device), atol=1e-7).item()
+
+        final_tensor = tensor_coords[:-1] / tensor_coords[-1] if not end_is_zero else tensor_coords[:-1] # Treat as direction if end coord is 0
+    else:
+        last_col = tensor_coords[..., -1:]
+        is_zero_mask = torch.isclose(last_col, torch.tensor(0.0, dtype=tensor_coords.dtype, device=tensor_coords.device), atol=1e-7)
+        effective_final_coords = torch.where(is_zero_mask, 1.0, last_col)
+
+        final_tensor = tensor_coords[..., :-1] / effective_final_coords
     
-    last_col = coords[:, -1:]
-    is_zero_mask = np.isclose(last_col, 0, atol=1e-7)
-    effective_final_coords = np.where(is_zero_mask, 1.0, last_col)
-    return coords[:, :-1] / effective_final_coords
+    return final_tensor.detach().cpu().numpy() if is_numpy else final_tensor 
 
 
 def create_projection_matrix(simplified_intrinsics: np.ndarray, extrinsics: np.ndarray):
