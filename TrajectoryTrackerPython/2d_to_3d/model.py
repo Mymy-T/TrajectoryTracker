@@ -17,10 +17,12 @@ class TrajectoryReconstructionNetwork(nn.Module):
         self.refinement_network = RefinementNetwork()
     
 
-    def forward(self, x): # x is (N, L, 2); sequence of image coords
+    def forward(self, x, lengths): # x is (N, L, 2); sequence of image coords; lengths is (N,)
         c, d = self.obtain_ray_representation(x)
         p = self.obtain_intersection_representation(c, d) # (N, L, 4)
-        delta_p = np.zeros((100, 50, 4)) # TODO: differencing
+       
+        delta_p = torch.zeros_like(p)
+        delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; last difference is just assumed to be 0
 
 
         eot_input = delta_p # (N, L, 4)
