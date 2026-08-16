@@ -28,7 +28,7 @@ class FocalLoss(nn.Module):
     def __init__(self, gamma=2.0, weights=None):
         super().__init__()
         self.gamma = gamma
-        self.weights = weights # Optional per-class (256,) tensor of static weights based on prior class distributions, composable with focal weighting
+        self.weights = weights # Optional per-class (256,) tensor of static weights based on prior class distributions
 
     def forward(self, pred, target): # Pred shape is (N, c, h, w), target is (N, h, w)
         ce = F.cross_entropy(pred, target, weight=self.weights, reduction="none") # (N, h, w); each element has l = -w_t * log(p_t)

@@ -7,7 +7,8 @@ import sys
 
 def load_or_create_mapping(mapping_file, match_title):
     """
-    Ensures a permanent match_#### assignment for this match title.
+    - mapping_file is a path
+    Ensures a permanent match_#### assignment for a given match title
     """
     mapping = {} # keys are video titles, values are folder_names (match_####)
     max_index = -1
@@ -31,6 +32,7 @@ def load_or_create_mapping(mapping_file, match_title):
             f.write(f"{mapping[match_title]}:{match_title}\n")
 
     return mapping[match_title] # match_####
+
 
 def export_annotated_frames_in_yolo_format(input_dir, output_dir):
     images_output_dir = os.path.join(output_dir, "images")
@@ -140,7 +142,7 @@ if __name__ == '__main__':
     match_title = source_clip_partial_path.split("/")[0]
     clip_folder_name = source_clip_partial_path.split("/")[1]
 
-    mapping_file = os.path.join(os.getcwd(), "match_title_to_number_mapping.txt")
+    mapping_file = paths.match_title_mapping_path
     numeric_match_folder = load_or_create_mapping(mapping_file, match_title)
 
     output_annotation_path = os.path.join(os.getcwd(), paths.annotated_data_folder, numeric_match_folder, clip_folder_name)
@@ -152,23 +154,16 @@ if __name__ == '__main__':
         print(f"Output directory created: {numeric_match_folder}/{clip_folder_name}")
 
 
-    command = [
-        sys.executable, "-m", "anylabeling.app",
-        source_clip_path,
-        # "--output", output_annotation_path
-    ]
+    command = [sys.executable, "-m", "anylabeling.app", source_clip_path]
 
     try:
         subprocess.run(command, check=True)
 
         print("Anylabeling window closed; exporting annotated frames...")
-
-        export_annotated_frames_in_yolo_format(
-            input_dir=source_clip_path,
-            output_dir=output_annotation_path
-        )
+        export_annotated_frames_in_yolo_format(input_dir=source_clip_path, output_dir=output_annotation_path)
         
         sys.exit(0) 
+
     except FileNotFoundError:
         print("Error: 'anylabeling' executable could not be verified in terminal environments.")
         sys.exit(1)

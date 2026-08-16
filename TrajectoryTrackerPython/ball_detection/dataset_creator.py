@@ -2,10 +2,8 @@ import cv2
 import math
 import numpy as np
 import os
-import pandas as pd
 from pathlib import Path
 from paths import ProjectPaths
-import sys
 
 def create_processed_dataset(data_path, processed_data_path, inference_threshold=100):
     H = 1080
@@ -36,19 +34,25 @@ def create_processed_dataset(data_path, processed_data_path, inference_threshold
                     value = parts[0] # class name
                     classes_dict[key] = value
 
+
             out_clip_folder = os.path.join(out_match_folder, clip)
+            
             if not os.path.exists(out_clip_folder):
                 os.mkdir(out_clip_folder)
                 print(f"{out_clip_folder} created.")
 
+
             out_img_folder = os.path.join(out_clip_folder, "images")
             out_heatmap_folder = os.path.join(out_clip_folder, "heatmaps")
+
             if not os.path.exists(out_img_folder):
                 os.mkdir(out_img_folder)
                 print(f"{out_img_folder} created.")
+
             if not os.path.exists(out_heatmap_folder):
                 os.mkdir(out_heatmap_folder)
                 print(f"{out_heatmap_folder} created.")
+
 
             num_already_existing_frames = 0
             for i in range(len(img_names)): # img_names and label_names have the same length

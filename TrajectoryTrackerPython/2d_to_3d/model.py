@@ -4,8 +4,6 @@ import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
-# TODO: Cleanup code to reuse projector.py, remove unecessary parts
-
 
 def _safe_divide(numerator, denominator, eps=1e-8):
     sign = torch.where(denominator >= 0, 1.0, -1.0)
@@ -27,7 +25,7 @@ def _reverse_valid_prefix(x, lengths):
     """
     -  x is (N, L, D)
     - lengths is (N,)
-    Returns reversed sequence, ignoring padding (which remains at end); applying twice returns original input
+    Returns reversed sequence, ignoring padding (which remains at end)
     """
     N, L, D = x.shape[0], x.shape[1], x.shape[2]
 
