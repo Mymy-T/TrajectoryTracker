@@ -2,7 +2,7 @@ import os
 
 class ProjectPaths:
     def __init__(self):
-        base_folder = os.path.dirname(os.path.abspath(__file__)) # paths.py should be on same level as other files
+        base_folder = os.path.dirname(os.path.abspath(__file__))
 
         # Data Collection & Dataset Creation
         self.raw_frame_folder = os.path.join(base_folder, "raw_frames") # For frames exported from clips

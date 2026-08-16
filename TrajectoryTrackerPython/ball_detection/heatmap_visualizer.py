@@ -4,7 +4,7 @@ import os
 from paths import ProjectPaths
 
 paths = ProjectPaths()
-heatmap = cv2.imread(os.path.join(paths.train_data_folder, "clip_0001", "heatmaps", "frame_0005_heatmap.png"), cv2.IMREAD_GRAYSCALE)
+heatmap = cv2.imread(os.path.join(paths.processed_data_folder, "clip_0001", "heatmaps", "frame_0005_heatmap.png"), cv2.IMREAD_GRAYSCALE)
 
 plt.figure(figsize=(8, 5))
 plt.imshow(heatmap, cmap='gray')
