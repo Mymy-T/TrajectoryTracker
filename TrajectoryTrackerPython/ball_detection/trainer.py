@@ -50,45 +50,54 @@ def _freeze_batchnorm(model):
 
 # MARK: Full Training/Setup
 # NOTE: Saves resume_checkpoint every batch_size batches, and on every last batch of epoch
-def train_and_evaluate_model(model, lr, batch_size, max_checkpoints, max_epochs, name, resuming, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1, max_train_seconds=None):
-    # Paths setup
-    paths = ProjectPaths()
-
-    if run_type == RunType.final_model_training:
-        log_path = os.path.join(paths.final_model_training_logs, name)
-        model_save_folder = os.path.join(paths.final_model_save_folder, name)
-    else:
-        log_path = os.path.join(paths.hyperparam_tuning_training_logs, name)
-        model_save_folder = os.path.join(paths.hyperparam_tuning_model_save_folder, name)
-
-    if not os.path.exists(log_path):
-        os.mkdir(log_path)
-    else:
-        if not resuming:
-            raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, rename this run, or set <resuming> to true.")
-        else:
-            print(f"Resuming a previous run ({name})...")
-
-    writer = SummaryWriter(log_dir=log_path)
-
-    checkpoints_folder = os.path.join(model_save_folder, "checkpoints")
-    if not os.path.exists(model_save_folder):
-        # Base path is final_models/name/; inside, there is a "checkpoints" folder to save all model checkpoints, and a model save file for the best model from the "checkpoints" folder
-        os.mkdir(model_save_folder)
-        os.mkdir(checkpoints_folder)
-    else:
-        if not resuming:
-            raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the previous run, rename this run, or set <resuming> to true.")
-        else:
-            print(f"Resuming a previous run ({name})...")
+def train_and_evaluate_model(model, lr, batch_size, max_checkpoints, max_epochs, name, resuming, run_type: RunType, verbose=True, eval_batch_size=None, accumulation_steps=1, max_train_seconds=None, log_and_save=True, train_dataset=None, valid_dataset=None, test_dataset=None):
     
-    resume_checkpoint_path = os.path.join(model_save_folder, "resume_checkpoint.pt") # Saved inside final_models/name/
-    resume_manager = ResumeCheckpointManager(resume_checkpoint_path)
+    if not log_and_save and resuming:
+        raise ValueError("resuming requires log_and_save=True, since resume state is persisted to disk.")
+
+    writer = None
+    resume_manager = None
+    checkpoint_manager = None
+
+    if log_and_save:
+        # Paths setup
+        paths = ProjectPaths()
+
+        if run_type == RunType.final_model_training:
+            log_path = os.path.join(paths.final_model_training_logs, name)
+            model_save_folder = os.path.join(paths.final_model_save_folder, name)
+        else:
+            log_path = os.path.join(paths.hyperparam_tuning_training_logs, name)
+            model_save_folder = os.path.join(paths.hyperparam_tuning_model_save_folder, name)
+
+        if not os.path.exists(log_path):
+            os.mkdir(log_path)
+        else:
+            if not resuming:
+                raise ValueError(f"A run with the same log name ({name}) has already been saved. Please either delete the previous run, rename this run, or set <resuming> to true.")
+            else:
+                print(f"Resuming a previous run ({name})...")
+
+        writer = SummaryWriter(log_dir=log_path)
+
+        checkpoints_folder = os.path.join(model_save_folder, "checkpoints")
+        if not os.path.exists(model_save_folder):
+            # Base path is final_models/name/; inside, there is a "checkpoints" folder to save all model checkpoints, and a model save file for the best model from the "checkpoints" folder
+            os.mkdir(model_save_folder)
+            os.mkdir(checkpoints_folder)
+        else:
+            if not resuming:
+                raise ValueError(f"A model with the same name ({name}) has already been saved. Please either delete the previous run, rename this run, or set <resuming> to true.")
+            else:
+                print(f"Resuming a previous run ({name})...")
+
+        resume_checkpoint_path = os.path.join(model_save_folder, "resume_checkpoint.pt") # Saved inside final_models/name/
+        resume_manager = ResumeCheckpointManager(resume_checkpoint_path)
 
     # Datasets
-    train_data = TrackNetDataset(DatasetType.train)
-    valid_data = TrackNetDataset(DatasetType.valid)
-    test_data = TrackNetDataset(DatasetType.test)
+    train_data = train_dataset if train_dataset is not None else TrackNetDataset(DatasetType.train)
+    valid_data = valid_dataset if valid_dataset is not None else TrackNetDataset(DatasetType.valid)
+    test_data = test_dataset if test_dataset is not None else TrackNetDataset(DatasetType.test)
 
     eval_batch_size = eval_batch_size if eval_batch_size is not None else batch_size # eval/test don't need gradients, so they can safely use a larger batch than training within the same memory budget
 
@@ -107,7 +116,8 @@ def train_and_evaluate_model(model, lr, batch_size, max_checkpoints, max_epochs,
     # MARK: Training
 
     start_epoch = 1
-    checkpoint_manager = CheckpointManager(checkpoints_folder, max_checkpoints) # Tracks/saves best_model_metrics (precision, mean_dist_error, recall, epoch); precision is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
+    if log_and_save:
+        checkpoint_manager = CheckpointManager(checkpoints_folder, max_checkpoints) # Tracks/saves best_model_metrics (precision, mean_dist_error, recall, epoch); precision is most important; then mde, then recall as a sanity check (make sure model isn't just skipping everything to have high precision)
 
     # Only used in _train_epoch
     resume_batch_idx = 0
@@ -126,7 +136,8 @@ def train_and_evaluate_model(model, lr, batch_size, max_checkpoints, max_epochs,
     for epoch in range(start_epoch, max_epochs + 1):
         data_generator.manual_seed(0 + epoch)
 
-        train_loss, time_limit_reached = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, resume_batch_idx=resume_batch_idx, total_loss=total_batch_loss, resume_manager=resume_manager, verbose=verbose, accumulation_steps=accumulation_steps, best_model_metrics=checkpoint_manager.best_model_metrics, max_train_seconds=max_train_seconds, training_start_time=training_start_time)
+        best_model_metrics = checkpoint_manager.best_model_metrics if checkpoint_manager is not None else None
+        train_loss, time_limit_reached = _train_epoch(model, optimizer, loss_fn, train_dataloader, epoch, resume_batch_idx, total_batch_loss, resume_manager, verbose, accumulation_steps, best_model_metrics, max_train_seconds, training_start_time)
 
         # Reset back to initial state, resuming has been completed; everything should run normally again
         resume_batch_idx = 0
@@ -134,47 +145,52 @@ def train_and_evaluate_model(model, lr, batch_size, max_checkpoints, max_epochs,
 
         if time_limit_reached:
             # Training is paused, not complete: skip validation, model selection, and finalization for this partial epoch; resume later using resume_checkpoint.pt
-            writer.flush()
-            writer.close()
+            if log_and_save:
+                writer.flush()
+                writer.close()
+
             return None
 
         valid_loss, tp, tn, fp, fn, te = evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
 
-        # Logging
-        writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) # Graph shows loss for both train & valid set (used to check for overfitting/underfitting)
-        eval_metrics = {"Precision": precision, "Recall": recall}
-        if mde is not None:
-            eval_metrics["MDE"] = mde
-        writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=eval_metrics, global_step=epoch) # Graph for validation set only; MDE omitted on steps with no true positives, rather than logging a spike
-        writer.flush()
+        if log_and_save:
+            # Logging
+            writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) # Graph shows loss for both train & valid set (used to check for overfitting/underfitting)
+            eval_metrics = {"Precision": precision, "Recall": recall}
+            if mde is not None:
+                eval_metrics["MDE"] = mde
+            writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=eval_metrics, global_step=epoch) # Graph for validation set only; MDE omitted on steps with no true positives, rather than logging a spike
+            writer.flush()
 
-        # Selection of the saved best checkpoint models
-        checkpoint_manager.update(model, epoch, precision, mde, recall)
+            # Selection of the saved best checkpoint models
+            checkpoint_manager.update(model, epoch, precision, mde, recall)
 
     # MARK: Post Training
 
-    best_model_path = checkpoint_manager.best_checkpoint_path()
+    if log_and_save:
+        best_model_path = checkpoint_manager.best_checkpoint_path()
 
-    # Load the best model and save it for easy access
-    model_state = torch.load(best_model_path, weights_only=True, map_location=device)
-    model.load_state_dict(model_state)
-    model_save_name = name + ".pt"
-    torch.save(model.state_dict(), os.path.join(model_save_folder, model_save_name)) # name.pt within final save models/name/
+        # Load the best model and save it for easy access
+        model_state = torch.load(best_model_path, weights_only=True, map_location=device)
+        model.load_state_dict(model_state)
+        model_save_name = name + ".pt"
+        torch.save(model.state_dict(), os.path.join(model_save_folder, model_save_name)) # name.pt within final save models/name/
 
     if run_type == RunType.final_model_training:
         test_loss, tp, tn, fp, fn, te = evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
         precision, mde, recall = compute_eval_metrics(tp, tn, fp, fn, te)
 
-        writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Test": test_loss}, global_step=1)
-        test_eval_metrics = {"TestPrecision": precision, "TestRecall": recall}
-        if mde is not None:
-            test_eval_metrics["TestMDE"] = mde
-        writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=test_eval_metrics, global_step=1)
-        writer.flush()
-        writer.close()
+        if log_and_save:
+            writer.add_scalars(main_tag="Loss", tag_scalar_dict={"Test": test_loss}, global_step=1)
+            test_eval_metrics = {"TestPrecision": precision, "TestRecall": recall}
+            if mde is not None:
+                test_eval_metrics["TestMDE"] = mde
+            writer.add_scalars(main_tag="Eval Metrics", tag_scalar_dict=test_eval_metrics, global_step=1)
+            writer.flush()
+            writer.close()
 
-        resume_manager.delete()
+            resume_manager.delete()
 
         return test_loss, precision, mde, recall
     # else: # TODO: Hyperparm tuning (possibly)
@@ -269,7 +285,8 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
             optimizer.step()
             optimizer.zero_grad()
 
-            resume_manager.save(model, optimizer, epoch, idx + 1, total_loss, best_model_metrics) # Resume on next batch
+            if resume_manager is not None:
+                resume_manager.save(model, optimizer, epoch, idx + 1, total_loss, best_model_metrics) # Resume on next batch
 
             if max_train_seconds is not None and (time.monotonic() - training_start_time) >= max_train_seconds:
 
@@ -286,7 +303,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
             break
     
 
-    avg_loss = total_loss/len(train_loader)
+    avg_loss = total_loss / num_batches
 
     if not time_limit_reached:
         if verbose:
@@ -298,9 +315,14 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
 
 # MARK: Evaluate
 def evaluate(model, loss_fn, data_loader, valid, verbose=True):
+
     model.eval()
-    print("Starting Evaluation...")
+
+    if verbose:
+        print("Starting Evaluation...")
+
     with torch.inference_mode():
+
         total_loss = 0
         tp_tot = 0
         tn_tot = 0

@@ -7,7 +7,7 @@ device = train_settings.device
 def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.01, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
     """
     checkpoint_model, new_model - tuples of (precision, mde, recall, epoch)
-    returns True is new model is better, False otherwise
+    Returns True is new model is better, False otherwise
     """
     # Check recalls
     if new_model[2] < min_recall:
@@ -36,10 +36,6 @@ class CheckpointManager:
             print(f"Keeping every checkpoint in {checkpoints_folder}")
 
 
-    def path_for_epoch(self, epoch):
-        return os.path.join(self.checkpoints_folder, f"epoch_{epoch}.pt")
-
-
     def update(self, model, epoch, precision, mde, recall):
 
         keep_all = self.max_checkpoints is None
@@ -55,7 +51,7 @@ class CheckpointManager:
         if _compare_model_performance(checkpoint_model=self.best_model_metrics[worst_idx], new_model=(precision, mde, recall)):
 
             deleted_model_metrics = self.best_model_metrics.pop(worst_idx) # Delete worst checkpoint
-            os.remove(self.path_for_epoch(deleted_model_metrics[3]))
+            os.remove(self._path_for_epoch(deleted_model_metrics[-1]))
             
             self._save(model, epoch, precision, mde, recall) # Insert new checkpoint
 
@@ -68,12 +64,16 @@ class CheckpointManager:
             if _compare_model_performance(checkpoint_model=self.best_model_metrics[best_idx], new_model=self.best_model_metrics[i]): # If true, best_idx doesn't refer to best model checkpoint
                 best_idx = i
 
-        return self.path_for_epoch(self.best_model_metrics[best_idx][3])
+        return self._path_for_epoch(self.best_model_metrics[best_idx][-1])
 
+
+    def _path_for_epoch(self, epoch):
+        return os.path.join(self.checkpoints_folder, f"epoch_{epoch}.pt")
+    
 
     def _save(self, model, epoch, precision, mde, recall):
         self.best_model_metrics.append((precision, mde, recall, epoch))
-        torch.save(model.state_dict(), self.path_for_epoch(epoch))
+        torch.save(model.state_dict(), self.__path_for_epoch(epoch))
 
 
 # MARK: Resume Manager
