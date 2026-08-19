@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from projection_component_paths import Paths
+from paths import Paths
 
 
 def obtain_keypoints(verbose=False):

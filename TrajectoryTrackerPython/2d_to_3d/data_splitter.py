@@ -2,7 +2,7 @@ from enum import Enum
 import math
 import os
 import pandas as pd
-from projection_component_paths import Paths
+from paths import Paths
 
 class DataSplitMode(Enum):
     camera_config_border = 0 # Split only at different camera configs

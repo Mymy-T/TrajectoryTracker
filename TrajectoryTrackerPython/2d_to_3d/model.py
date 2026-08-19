@@ -41,7 +41,7 @@ def _reverse_valid_prefix(x, lengths):
     return torch.gather(x, dim=1, index=indices) # (N, L, D); looks up the corresponding reversed/padding indicies for the L dimension
 
 
-def _mask_out(x, mask):
+def _mask(x, mask):
     """
     Replaces padded positions with zero
     - x is (N, L, D)
@@ -60,6 +60,7 @@ def _run_lstm_with_packing(lstm, x, lengths):
     return out
 
 
+# MARK: Full Network
 class TrajectoryReconstructionNetwork(nn.Module):
 
     def __init__(self, intrinsics, extrinsics: np.ndarray): # intrinsics is 3 x 3; extrinsincs is 4 x 4
@@ -81,12 +82,12 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         c, d = self.obtain_ray_representation(x)
         p = self.obtain_intersection_representation(c, d) # (N, L, 4)
-        p = _mask_out(p, mask) # Zero out padded positions
+        p = _mask(p, mask) # Zero out padded positions
 
         delta_p = torch.zeros_like(p)
         delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; (N, L, 4)
         difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
-        delta_p = _mask_out(delta_p, difference_mask)
+        delta_p = _mask(delta_p, difference_mask)
 
         eot_input = delta_p # (N, L, 4)
         epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
@@ -98,8 +99,8 @@ class TrajectoryReconstructionNetwork(nn.Module):
         coord_deltas = self.refinement_network(refinement_input, lengths) # (N, L, 3)
 
         final_coords = coords + coord_deltas
-        final_coords = _mask_out(final_coords, mask)
-        epsilons = _mask_out(epsilons, mask)
+        final_coords = _mask(final_coords, mask)
+        epsilons = _mask(epsilons, mask)
 
         return final_coords, epsilons # (N, L, 3), (N, L, 1)
 
@@ -165,7 +166,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         return torch.stack((x, h, z), dim=-1) # (N, L, 3)
 
 
-
+# MARK: EOT Network
 class EOTNetwork(nn.Module):
 
     def __init__(self):
@@ -197,11 +198,12 @@ class EOTNetwork(nn.Module):
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         epsilons = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        epsilons = _mask_out(epsilons, _build_validity_mask(lengths, x.shape[1]))
+        epsilons = _mask(epsilons, _build_validity_mask(lengths, x.shape[1]))
 
         return epsilons  # (N, L, 1)
 
 
+# MARK: Height Delta LSTM
 class HeightDeltaLSTM(nn.Module):
 
     def __init__(self):
@@ -256,6 +258,7 @@ class HeightDeltaLSTM(nn.Module):
         return heights_tensor
 
 
+# MARK: Height LSTM
 class HeightLSTM(nn.Module):
 
     def __init__(self):
@@ -286,11 +289,12 @@ class HeightLSTM(nn.Module):
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         h_refined = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        h_refined = _mask_out(h_refined, _build_validity_mask(lengths, x.shape[1]))
+        h_refined = _mask(h_refined, _build_validity_mask(lengths, x.shape[1]))
 
         return h_refined  # (N, L, 1)
 
 
+# MARK: Height Network
 class HeightNetwork(nn.Module):
 
     def __init__(self):
@@ -321,6 +325,7 @@ class HeightNetwork(nn.Module):
         return h_refined  # (N, L, 1)
 
 
+# MARK: Refinement Network
 class RefinementNetwork(nn.Module):
     def __init__(self):
         super().__init__()
@@ -350,6 +355,6 @@ class RefinementNetwork(nn.Module):
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         position_deltas = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 3); add residual from lstm_0
-        position_deltas = _mask_out(position_deltas, _build_validity_mask(lengths, x.shape[1]))
+        position_deltas = _mask(position_deltas, _build_validity_mask(lengths, x.shape[1]))
 
         return position_deltas  # (N, L, 3)

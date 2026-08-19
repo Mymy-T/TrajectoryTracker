@@ -2,7 +2,7 @@ from enum import Enum
 import numpy as np
 import os
 import pandas as pd
-from projection_component_paths import Paths
+from paths import Paths
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
@@ -51,7 +51,7 @@ class TrajectoryReconstructionDataset(Dataset):
         trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path))
         trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path))
 
-        return (trajectory_2d, trajectory_3d)
+        return (trajectory_2d, trajectory_3d) # TODO: Update to return eot_targets as well
     
 if __name__ == "__main__":
     data = TrajectoryReconstructionDataset(DatasetType.valid)

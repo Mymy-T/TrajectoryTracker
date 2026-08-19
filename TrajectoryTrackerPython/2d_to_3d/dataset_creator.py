@@ -3,7 +3,7 @@ import os
 import pandas as pd
 from torch import full
 from physics import generate_random_trajectory
-from projection_component_paths import Paths
+from paths import Paths
 import projector as proj
 
 

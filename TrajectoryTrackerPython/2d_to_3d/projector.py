@@ -5,7 +5,7 @@ import json
 from manual_keypoint_labeler import obtain_keypoints
 import numpy as np
 import os
-from projection_component_paths import Paths
+from paths import Paths
 from physics import generate_sample_trajectory
 import torch
 from visualizer import overlay_trajectory_on_image, plot_2d_trajectory

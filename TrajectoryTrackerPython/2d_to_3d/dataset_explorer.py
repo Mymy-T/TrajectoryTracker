@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
-from projection_component_paths import Paths
+from paths import Paths
 import projector as proj
 from visualizer import overlay_trajectory_on_image, plot_2d_trajectory, plot_3d_trajectory
 
