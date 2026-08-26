@@ -48,6 +48,7 @@ class DatasetExplorerApp(tk.Tk):
         self._current_trajectory_row = None
         self._current_trajectory_3d = None
         self._current_trajectory_2d = None
+        self._current_trajectory_eot = None
         self._current_trajectory_2d_small = None
         self._fade_window_frames = None # FADE_TRAIL_SECONDS converted to a frame count using the current trajectory's own timestep
 
@@ -216,10 +217,12 @@ class DatasetExplorerApp(tk.Tk):
         self._cancel_animation()
         self._cancel_pending_slider_redraw()
 
+        data_folder = self.paths.synthetic_data_folder
         self._current_trajectory_row = row
-        self._current_trajectory_3d = np.load(row.trajectory_3d_path)
-        trajectory_2d = np.load(row.trajectory_2d_path)
+        self._current_trajectory_3d = np.load(os.path.join(data_folder, row.trajectory_3d_path))
+        trajectory_2d = np.load(os.path.join(data_folder, row.trajectory_2d_path))
         self._current_trajectory_2d = trajectory_2d
+        self._current_trajectory_eot = np.load(os.path.join(data_folder, row.trajectory_eot_path))
 
         # Scale projected points down to the cached small overlay image's resolution.
         scale = np.array([self._base_image_small.shape[1] / 1920, self._base_image_small.shape[0] / 1080])
@@ -241,10 +244,11 @@ class DatasetExplorerApp(tk.Tk):
         traj_3d = self._current_trajectory_3d[:frame_idx + 1]
         traj_2d = self._current_trajectory_2d[:frame_idx + 1]
         traj_2d_small = self._current_trajectory_2d_small[:frame_idx + 1]
+        traj_eot = self._current_trajectory_eot[:frame_idx + 1]
         fade_window = self._fade_window_frames if self.fade_mode.get() else None
 
         self.ax_3d.clear()
-        plot_3d_trajectory(traj_3d, ax=self.ax_3d, fade_window=fade_window)
+        plot_3d_trajectory(traj_3d, traj_eot, ax=self.ax_3d, fade_window=fade_window)
 
         self.ax_2d_plot.clear()
         plot_2d_trajectory(traj_2d, ax=self.ax_2d_plot, fade_window=fade_window)

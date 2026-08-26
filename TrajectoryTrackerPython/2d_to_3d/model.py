@@ -93,7 +93,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
         heights = self.height_network(p, delta_p, epsilons, lengths) # (N, L, 1)
 
-        coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords
+        coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords; (N, L, 3)
 
         refinement_input = torch.cat((coords, p), dim=-1) # (N, L, 7)
         coord_deltas = self.refinement_network(refinement_input, lengths) # (N, L, 3)

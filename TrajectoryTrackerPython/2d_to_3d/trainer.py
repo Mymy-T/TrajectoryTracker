@@ -1,5 +1,5 @@
 from checkpointing import CheckpointManager, ResumeCheckpointManager, LossLog
-from dataset import TrajectoryReconstructionDataset, DatasetType
+from dataset import TrajectoryReconstructionDataset, DatasetType, homogenize_seq_length
 from loss import FullLoss
 import os
 from paths import Paths
@@ -52,9 +52,9 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
     sampler = RandomSampler(train_data, generator=data_generator)
 
     running_on_cpu = (device.type == "cpu") # Pin memory if a gpu is present; this prevents allocated tensors from being moved to disk, speeding up how fast the tensors can be forwarded to the gpu
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, sampler=sampler, pin_memory=(not running_on_cpu)) # Use custom sampler
-    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, pin_memory=(not running_on_cpu))
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, pin_memory=(not running_on_cpu))
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, sampler=sampler, pin_memory=(not running_on_cpu), collate_fn=homogenize_seq_length) # Use custom sampler
+    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, pin_memory=(not running_on_cpu), collate_fn=homogenize_seq_length)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, pin_memory=(not running_on_cpu), collate_fn=homogenize_seq_length)
 
     # Optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -98,16 +98,16 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
 
         valid_loss, valid_loss_components = evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
 
+        # Selection of the saved best checkpoint models
+        checkpoint_manager.update(model, epoch, valid_loss)
+
         # Logging
-        writer.add_scalars(main_tag="Total Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch) 
-        writer.add_scalars(main_tag="EOT Loss", tag_scalar_dict={"Train": train_loss_components[0], "Valid": valid_loss_components[0]}, global_step=epoch) 
-        writer.add_scalars(main_tag="Trajectory Loss", tag_scalar_dict={"Train": train_loss_components[1], "Valid": valid_loss_components[1]}, global_step=epoch) 
+        writer.add_scalars(main_tag="Total Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch)
+        writer.add_scalars(main_tag="EOT Loss", tag_scalar_dict={"Train": train_loss_components[0], "Valid": valid_loss_components[0]}, global_step=epoch)
+        writer.add_scalars(main_tag="Trajectory Loss", tag_scalar_dict={"Train": train_loss_components[1], "Valid": valid_loss_components[1]}, global_step=epoch)
         writer.add_scalars(main_tag="Below Ground Loss", tag_scalar_dict={"Train": train_loss_components[2], "Valid": valid_loss_components[2]}, global_step=epoch)
 
         writer.flush()
-
-    # Selection of the saved best checkpoint models
-    checkpoint_manager.update(model, epoch, valid_loss)
 
     # MARK: Post Training
 
@@ -146,17 +146,19 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     trajectory_loss = loss_log.trajectory_loss
     below_ground_loss = loss_log.below_ground_loss
 
-    for idx, batch in enumerate(train_loader): # Batch is (inputs, outputs)
+    for idx, batch in enumerate(train_loader): # Batch is (inputs, coord_labels, eot_labels, lengths)
 
         if idx < resume_batch_idx:
             continue
 
         inputs = batch[0].to(device)
-        outputs = batch[1].to(device)
+        coord_labels = batch[1].to(device)
+        eot_labels = batch[2].to(device)
+        lengths = batch[3].to(device)
 
-        pred = model(inputs)
+        pred_coords, pred_eot = model(inputs, lengths)
 
-        loss, loss_components = loss_fn(pred, outputs)
+        loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels)
         loss.backward() # Accumulates gradients if zero grad isn't called
 
         total_loss += loss.item() # Aggregates losses for logging
@@ -167,9 +169,8 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         optimizer.step()
         optimizer.zero_grad()
 
-        if resume_manager is not None:
-            loss_log = LossLog(total_loss, (eot_loss, trajectory_loss, below_ground_loss))
-            resume_manager.save(model, optimizer, epoch, idx + 1, loss_log, best_model_metrics) # Resume on next batch
+        loss_log = LossLog(total_loss, (eot_loss, trajectory_loss, below_ground_loss))
+        resume_manager.save(model, optimizer, epoch, idx + 1, loss_log, best_model_metrics) # Resume on next batch
 
         if max_train_seconds is not None and (time.monotonic() - training_start_time) >= max_train_seconds:
 
@@ -216,13 +217,14 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
         trajectory_loss = 0
         below_ground_loss = 0
 
-        for idx, batch in enumerate(data_loader): # Batch is (inputs, coord_labels, eot_labels)
+        for idx, batch in enumerate(data_loader): # Batch is (inputs, coord_labels, eot_labels, lengths)
 
             inputs = batch[0].to(device) # (N, L, 2)
             coord_labels = batch[1].to(device) # (N, L, 3)
             eot_labels = batch[2].to(device) # (N, L, 1)
+            lengths = batch[3].to(device) # (N,)
 
-            pred_coords, pred_eot = model(inputs) # (N, L, 3), (N, L, 1)
+            pred_coords, pred_eot = model(inputs, lengths) # (N, L, 3), (N, L, 1)
 
             loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels)
 

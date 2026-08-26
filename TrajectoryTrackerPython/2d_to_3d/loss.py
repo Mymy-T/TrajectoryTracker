@@ -5,13 +5,16 @@ import torch.nn.functional as F
 
 class FullLoss(nn.Module):
 
-    def __init__(self, eot_imbalance_weight, loss_weights=[10, 1, 10]):
+    def __init__(self, eot_imbalance_weight, loss_weights=None):
 
         super().__init__()
 
+        if loss_weights is None:
+            loss_weights = [10, 1, 10]
+
         if len(loss_weights) != 3:
             raise IndexError("loss_weights must have length 3.")
-        
+
         self.loss_weights = loss_weights
 
         self.eot_loss_fn = EOTLoss(eot_imbalance_weight)
@@ -45,9 +48,12 @@ class EOTLoss(nn.Module):
     def forward(self, pred, target):
         """
         - pred is (N, L, 1)
-        - target is (N, L)
+        - target is (N, L, 1)
         """
-        bce = F.binary_cross_entropy(pred.squeeze(-1), target, self.imbalance_weight) # NOTE: pred_eps is already masked to 0 for all elements beyond length; ground truth will also have them masked as 0, producing 0 loss
+        pred = pred.squeeze(-1) # (N, L)
+        target = target.squeeze(-1) # (N, L)
+        weight = torch.where(target == 1, self.imbalance_weight, 1.0) # Per-element weight up-weighting the positive (EOT) class
+        bce = F.binary_cross_entropy(pred, target, weight=weight) # NOTE: pred_eps is already masked to 0 for all elements beyond length; ground truth will also have them masked as 0, producing 0 loss
         return bce
 
 
@@ -78,6 +84,10 @@ class BelowGroundLoss(nn.Module):
         y_coords = pred[:, :, 1]
         y_coords = torch.where(y_coords >= 0, 0, y_coords)**2
         num_negative_y = (y_coords != 0).sum().item()
+
+        if num_negative_y == 0:
+            return torch.zeros((), device=pred.device, dtype=pred.dtype)
+
         error = y_coords.sum() / num_negative_y
 
         return error

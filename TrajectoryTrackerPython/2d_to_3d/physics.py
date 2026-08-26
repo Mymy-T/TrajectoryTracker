@@ -31,6 +31,7 @@ class PhysicsSimulation():
         - num_hits_range, hit_zone_bounds, bounce_trigger_cap only apply to TrajectoryMode.BOUNCE_AND_HIT
         - max_bounces only applies to TrajectoryMode.BOUNCE_ONLY.
         - oob_buffer is the extra length in meters added to length and width of court before ball is considered out of bounds; applied to all modes
+        Returns trajectory, times, eot
         """
         if mode == TrajectoryMode.NO_BOUNCE:
             return self._compute_trajectory_no_bounce(oob_buffer=oob_buffer)
@@ -63,7 +64,7 @@ class PhysicsSimulation():
             if out_of_bounds:
                 break
 
-        return np.array(trajectory), np.array(times)
+        return np.array(trajectory), np.array(times), np.zeros_like(trajectory, dtype=np.float32)
 
 
     def _compute_trajectory_bounce_only(self, max_bounces, oob_buffer):
@@ -94,7 +95,7 @@ class PhysicsSimulation():
             if n_bounces == max_bounces or out_of_bounds:
                 break
 
-        return np.array(trajectory), np.array(times)
+        return np.array(trajectory), np.array(times), np.zeros_like(trajectory, dtype=np.float32)
 
 
     def _compute_trajectory_bounce_and_hit(self, num_hits_range, hit_zone_bounds, bounce_trigger_cap, oob_buffer):
@@ -113,11 +114,13 @@ class PhysicsSimulation():
 
         trajectory = []
         times = []
+        eot = []
         i = 0
         while True:
 
             trajectory.append(self.ball_state.position.copy())
             times.append(i * self.timestep)
+            eot.append(0.0)
 
             i += 1
             self._rk4_step()
@@ -136,6 +139,9 @@ class PhysicsSimulation():
                 bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= bounce_trigger_cap)
 
                 if in_hit_zone or bounce_trigger_cap_reached:
+                    if i > 0:
+                        eot[i - 1] = 1.0 # Set EOT flag to true for the timestep right before the racket hit
+
                     vf, wf = self._simulate_racket_hit()
                     self.ball_state.velocity = vf
                     self.ball_state.spin = wf
@@ -163,7 +169,7 @@ class PhysicsSimulation():
             if out_of_bounds:
                 break
 
-        return np.array(trajectory), np.array(times)
+        return np.array(trajectory), np.array(times), np.array(eot)
 
 
     def _compute_accelerations(self, v, w):

@@ -35,7 +35,7 @@ class CheckpointManager:
             if _compare_model_performance(checkpoint_model=self.best_model_metrics[i], new_model=self.best_model_metrics[worst_idx]): # If true, worst_idx doesn't refer to worst model checkpoint
                 worst_idx = i
 
-        if _compare_model_performance(checkpoint_model=self.best_model_metrics[worst_idx], new_model=loss):
+        if _compare_model_performance(checkpoint_model=self.best_model_metrics[worst_idx], new_model=(loss, epoch)):
             deleted_model_metrics = self.best_model_metrics.pop(worst_idx) # Delete worst checkpoint
             os.remove(self._path_for_epoch(deleted_model_metrics[-1]))
             self._save(model, epoch, loss) # Insert new checkpoint
@@ -65,10 +65,6 @@ class ResumeCheckpointManager:
 
     def __init__(self, resume_checkpoint_path):
         self.resume_checkpoint_path = resume_checkpoint_path
-
-    def _obtain_loss_values(resume_checkpoint):
-        return resume_checkpoint["total_loss"], (resume_checkpoint["eot_loss"], resume_checkpoint["trajectory_loss"], resume_checkpoint["below_ground_loss"])
-
 
     def load(self, model, optimizer):
 

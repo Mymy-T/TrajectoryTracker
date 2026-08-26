@@ -37,9 +37,11 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
 
     trajectories_3d_folder = os.path.join(dataset_folder, "trajectories_3d")
     trajectories_2d_folder = os.path.join(dataset_folder, "trajectories_2d")
+    trajectories_eot_folder = os.path.join(dataset_folder, "trajectories_eot")
 
     os.makedirs(trajectories_3d_folder, exist_ok=True)
     os.makedirs(trajectories_2d_folder, exist_ok=True)
+    os.makedirs(trajectories_eot_folder, exist_ok=True)
 
 
     rows = []
@@ -50,16 +52,18 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
 
         for trajectory_id in range(trajectories_per_config):
 
-            trajectory, times = generate_random_trajectory(rng, timestep=timestep, bounces=bounces, racket_hits=hits)
+            trajectory, times, eot = generate_random_trajectory(rng, timestep=timestep, bounces=bounces, racket_hits=hits)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
 
             example_id = f"camera_config_{camera_config_id:04d}__trajectory_{trajectory_id:04d}"
 
             trajectory_3d_path = os.path.join(trajectories_3d_folder, f"{example_id}.npy")
             trajectory_2d_path = os.path.join(trajectories_2d_folder, f"{example_id}.npy")
+            trajectory_eot_path = os.path.join(trajectories_eot_folder, f"{example_id}.npy")
 
             np.save(trajectory_3d_path, trajectory)
             np.save(trajectory_2d_path, projected_trajectory)
+            np.save(trajectory_eot_path, eot)
 
             rows.append({
                 "camera_config_id": camera_config_id,
@@ -71,6 +75,7 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
                 **{f"extrinsics_{i}": v for i, v in enumerate(extrinsics.flatten())},
                 "trajectory_3d_path": _remove_path_before(full_path=trajectory_3d_path, first_part_to_keep="trajectories_3d"),
                 "trajectory_2d_path": _remove_path_before(full_path=trajectory_2d_path, first_part_to_keep="trajectories_2d"),
+                "trajectory_eot_path": _remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot"),
                 "num_points": len(trajectory),
                 "timestep": timestep,
                 "bounces": bounces,

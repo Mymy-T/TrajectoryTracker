@@ -164,10 +164,12 @@ def _plot_fading_line_3d(ax, plot_x, plot_y, plot_z, fade_window, label=None, co
     ax.add_collection3d(Line3DCollection(segments, colors=colors, linewidth=2, label=label))
 
 
-def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
+def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
     """
     If ax is None, creates a new figure/3D axes and calls plt.show() at the end (standalone use);
     else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
+
+    If eot is not None, points with EOT flag set to 1 will be represented as a yellow dot
     """
     court_properties = CourtProperties()
     l = court_properties.court_length
@@ -258,6 +260,16 @@ def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
     ax.scatter(x[0], z[0], y[0], color="green", s=50, label="Start")
     ax.scatter(x[-1], z[-1], y[-1], color="red", s=50, label="End")
 
+    # Highlight EOT points if they're passed in
+    if eot is not None:
+        indices = sorted(_find_eot_point_indices(trajectory, eot).tolist())
+
+        eot_x = [x[i] for i in indices]
+        eot_y = [y[i] for i in indices]
+        eot_z = [z[i] for i in indices]
+
+        ax.scatter(eot_x, eot_z, eot_y, color="yellow", s=30, label="EOT points")
+
     ax.set_xlim([-l/2 - 1, l/2 + 1])
     ax.set_ylim([-w/2 - 1, w/2 + 1])
     ax.invert_yaxis() # This way negative values of z axis are towards the left
@@ -274,3 +286,14 @@ def plot_3d_trajectory(trajectory, ax=None, fade_window=None):
 
     if standalone:
         plt.show()
+
+
+def _find_eot_point_indices(trajectory, eot):
+    """
+    trajectory is (N, 3); eot is (N,)
+    """
+    combined = np.concatenate((trajectory, np.expand_dims(eot, axis=-1)), axis=1)
+    row_indices = np.where(combined[:, -1] == 1.0)[0] # Ignore column indices
+
+    return row_indices
+    

@@ -1,4 +1,5 @@
 from enum import Enum
+import select
 import numpy as np
 import os
 import pandas as pd
@@ -14,14 +15,15 @@ class DatasetType(Enum):
 
 
 def homogenize_seq_length(batch):
-    inputs, outputs = zip(*batch) # [(x1, y1), (x2, y2), ...] -> [(x1, x2, ...), (y1, y2, ...)]
+    inputs, outputs, eot_labels = zip(*batch) # [(i1, o1, el1), (i2, o2, el2), ...] -> [(i1, i2, ...), (o1, o2, ...), (el1, el2, ...)]
 
     lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths; (N,)
     
     padded_inputs = pad_sequence(inputs, batch_first=True, padding_value=0.0)
     padded_outputs = pad_sequence(outputs, batch_first=True, padding_value=0.0)
+    padded_eot_labels = pad_sequence(eot_labels, batch_first=True, padding_value=0.0)
     
-    return padded_inputs, padded_outputs, lengths
+    return padded_inputs, padded_outputs, padded_eot_labels, lengths
 
 
 class TrajectoryReconstructionDataset(Dataset):
@@ -47,22 +49,25 @@ class TrajectoryReconstructionDataset(Dataset):
         selected_example = self.data_df.iloc[idx, :]
         trajectory_3d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_3d_path"])
         trajectory_2d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_2d_path"])
+        trajectory_eot_path = os.path.join(self.data_folder, selected_example.loc["trajectory_eot_path"])
         
-        trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path))
-        trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path))
+        trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path)) # (L, 2)
+        trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)) # (L, 3)
+        trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1) # (L, 1)
 
-        return (trajectory_2d, trajectory_3d) # TODO: Update to return eot_targets as well
+        return (trajectory_2d, trajectory_3d, trajectory_eot)
     
 if __name__ == "__main__":
     data = TrajectoryReconstructionDataset(DatasetType.valid)
     print(f"Input shape: {data[0][0].shape}")
     print(f"Label shape: {data[0][1].shape}")
     print("\n")
-    print(f"Valid data num examples: {data.__len__()}")
+    print(f"Num examples in dataset: {data.__len__()}")
 
     dataloader = DataLoader(data, batch_size=3, shuffle=True, collate_fn=homogenize_seq_length)
     batch = next(iter(dataloader))
     print("\n")
-    print(f"Example batch input shape: {batch[0].shape}")
-    print(f"Example batch output shape: {batch[1].shape}")
-    print(f"Lengths array of above batch: {batch[2]}")
+    print(f"Example batch 2d coords shape: {batch[0].shape}")
+    print(f"Example batch 3d coords shape: {batch[1].shape}")
+    print(f"EOT array of above batch: {batch[2].shape}")
+    print(f"Lengths array: {batch[3]}")
