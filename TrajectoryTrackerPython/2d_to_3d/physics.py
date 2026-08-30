@@ -64,7 +64,7 @@ class PhysicsSimulation():
             if out_of_bounds:
                 break
 
-        return np.array(trajectory), np.array(times), np.zeros_like(trajectory, dtype=np.float32)
+        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
     def _compute_trajectory_bounce_only(self, max_bounces, oob_buffer):
@@ -95,7 +95,7 @@ class PhysicsSimulation():
             if n_bounces == max_bounces or out_of_bounds:
                 break
 
-        return np.array(trajectory), np.array(times), np.zeros_like(trajectory, dtype=np.float32)
+        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
     def _compute_trajectory_bounce_and_hit(self, num_hits_range, hit_zone_bounds, bounce_trigger_cap, oob_buffer):
@@ -139,8 +139,7 @@ class PhysicsSimulation():
                 bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= bounce_trigger_cap)
 
                 if in_hit_zone or bounce_trigger_cap_reached:
-                    if i > 0:
-                        eot[i - 1] = 1.0 # Set EOT flag to true for the timestep right before the racket hit
+                    eot[i - 1] = 1.0 # Set EOT flag to true for the timestep right before the racket hit; i is always >= 1 here due to already being incremented
 
                     vf, wf = self._simulate_racket_hit()
                     self.ball_state.velocity = vf
@@ -169,7 +168,7 @@ class PhysicsSimulation():
             if out_of_bounds:
                 break
 
-        return np.array(trajectory), np.array(times), np.array(eot)
+        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.array(eot, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
     def _compute_accelerations(self, v, w):

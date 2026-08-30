@@ -16,8 +16,8 @@ def assess_final_position(timestep_options: list):
     print("All positions are formatted as (x, y, z)")
 
     for timestep in timestep_options:
-        trajectory, _ = generate_sample_trajectory(timestep, bounces=True)
-        no_bounce_trajectory, _ = generate_sample_trajectory(timestep, bounces=False)
+        trajectory, _, _ = generate_sample_trajectory(timestep, bounces=True)
+        no_bounce_trajectory, _, _ = generate_sample_trajectory(timestep, bounces=False)
 
         final_position = trajectory[-1]
         no_bounce_final_position = no_bounce_trajectory[-1]
@@ -33,9 +33,9 @@ def assess_trajectory_error(timesteps: list, reference_timestep: float):
         return
 
 
-    reference_trajectory, reference_times = generate_sample_trajectory(reference_timestep, bounces=True)
+    reference_trajectory, reference_times, _ = generate_sample_trajectory(reference_timestep, bounces=True)
 
-    no_bounce_reference_trajectory, no_bounce_reference_times = generate_sample_trajectory(reference_timestep, bounces=False)
+    no_bounce_reference_trajectory, no_bounce_reference_times, _ = generate_sample_trajectory(reference_timestep, bounces=False)
 
     print(f"\nReference timestep: {_format_timestep(reference_timestep)} s")
     print("-" * 20)
@@ -45,8 +45,8 @@ def assess_trajectory_error(timesteps: list, reference_timestep: float):
     for timestep in timesteps:
 
         # Bounce trajectories
-        trajectory, times = generate_sample_trajectory(timestep, bounces=True)
-        no_bounce_trajectory, no_bounce_times = generate_sample_trajectory(timestep, bounces=False)
+        trajectory, times, _ = generate_sample_trajectory(timestep, bounces=True)
+        no_bounce_trajectory, no_bounce_times, _ = generate_sample_trajectory(timestep, bounces=False)
 
         valid_mask = times <= reference_times[-1]
         times_valid = times[valid_mask]

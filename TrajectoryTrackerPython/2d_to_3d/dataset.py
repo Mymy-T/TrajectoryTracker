@@ -1,9 +1,9 @@
 from enum import Enum
-import select
 import numpy as np
 import os
 import pandas as pd
 from paths import Paths
+import settings
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
@@ -17,7 +17,7 @@ class DatasetType(Enum):
 def homogenize_seq_length(batch):
     inputs, outputs, eot_labels = zip(*batch) # [(i1, o1, el1), (i2, o2, el2), ...] -> [(i1, i2, ...), (o1, o2, ...), (el1, el2, ...)]
 
-    lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths; (N,)
+    lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths; shape of lengths is (N,)
     
     padded_inputs = pad_sequence(inputs, batch_first=True, padding_value=0.0)
     padded_outputs = pad_sequence(outputs, batch_first=True, padding_value=0.0)
@@ -51,9 +51,9 @@ class TrajectoryReconstructionDataset(Dataset):
         trajectory_2d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_2d_path"])
         trajectory_eot_path = os.path.join(self.data_folder, selected_example.loc["trajectory_eot_path"])
         
-        trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path)) # (L, 2)
-        trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)) # (L, 3)
-        trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1) # (L, 1)
+        trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path)).to(dtype=settings.torch_dtype) # (L, 2)
+        trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)).to(dtype=settings.torch_dtype) # (L, 3)
+        trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1).to(dtype=settings.torch_dtype) # (L, 1)
 
         return (trajectory_2d, trajectory_3d, trajectory_eot)
     

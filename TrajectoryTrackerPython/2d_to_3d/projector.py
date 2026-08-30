@@ -185,8 +185,8 @@ def project_trajectory_to_2d(trajectory: np.ndarray, projection_matrix: np.ndarr
         homogeneous_projection = np.matmul(projection_matrix, homogeneous_point)
         projection = dehomogenize(homogeneous_projection)
         projected_trajectory.append(projection)
-    
-    return np.stack(projected_trajectory, axis=0)
+
+    return np.stack(projected_trajectory, axis=0).astype(np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
 if __name__ == "__main__":
@@ -197,7 +197,7 @@ if __name__ == "__main__":
     print(extrinsics if extrinsics is not None else "Failure to obtain extrinsics")
 
     if extrinsics is not None:
-        trajectory, _ = generate_sample_trajectory()
+        trajectory, _, _ = generate_sample_trajectory()
         projection_matrix = create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
         projected_trajectory = project_trajectory_to_2d(trajectory, projection_matrix)
 

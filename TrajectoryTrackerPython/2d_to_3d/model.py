@@ -1,5 +1,6 @@
 import numpy as np
 from projector import dehomogenize
+import settings
 import torch
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -52,7 +53,7 @@ def _mask(x, mask):
 
 def _run_lstm_with_packing(lstm, x, lengths):
     """
-    Returns a padded (N, L, hidden*2) tensor (from bidirectional lstm); uses Pytorch natural pack padding functionality
+    Returns a padded (N, L, D*2) tensor (for bidirectional lstms); Pytorch natural pack padding functionality
     """
     packed_in = pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
     packed_out, _ = lstm(packed_in)
@@ -66,12 +67,14 @@ class TrajectoryReconstructionNetwork(nn.Module):
     def __init__(self, intrinsics, extrinsics: np.ndarray): # intrinsics is 3 x 3; extrinsincs is 4 x 4
         super().__init__()
 
-        self.register_buffer("intrinsics", torch.as_tensor(intrinsics, dtype=torch.float32))
-        self.register_buffer("extrinsics", torch.as_tensor(extrinsics, dtype=torch.float32))
+        self.register_buffer("intrinsics", torch.as_tensor(intrinsics, dtype=settings.torch_dtype))
+        self.register_buffer("extrinsics", torch.as_tensor(extrinsics, dtype=settings.torch_dtype))
 
         self.eot_network = EOTNetwork()
         self.height_network = HeightNetwork()
         self.refinement_network = RefinementNetwork()
+
+        self.to(dtype=settings.torch_dtype)
 
 
     def forward(self, x, lengths): # x is (N, L, 2); sequence of image coords; lengths is (N,)

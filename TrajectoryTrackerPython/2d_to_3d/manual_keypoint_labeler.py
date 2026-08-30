@@ -34,8 +34,12 @@ def obtain_keypoints(verbose=False):
 
     cv2.destroyAllWindows()
 
-    points = np.stack(selected_points, axis=0)
-    np.save(paths.saved_keypoints_path, points)
+    if len(selected_points) == 4:
+        points = np.stack(selected_points, axis=0)
+        np.save(paths.saved_keypoints_path, points)
+    else:
+        print("Error: Must select 4 points")
+        exit()
 
     if verbose:
         print("--- Final Selected Coordinates ---")

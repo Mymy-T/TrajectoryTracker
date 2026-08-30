@@ -158,7 +158,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
 
         pred_coords, pred_eot = model(inputs, lengths)
 
-        loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels)
+        loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
         loss.backward() # Accumulates gradients if zero grad isn't called
 
         total_loss += loss.item() # Aggregates losses for logging
@@ -226,7 +226,7 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
 
             pred_coords, pred_eot = model(inputs, lengths) # (N, L, 3), (N, L, 1)
 
-            loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels)
+            loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
 
             total_loss += loss.item()
             eot_loss += loss_components[0].item()
