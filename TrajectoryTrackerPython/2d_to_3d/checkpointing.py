@@ -1,8 +1,8 @@
 import os
 import torch
-import train_settings
+import settings
 
-device = train_settings.device
+device = settings.device
 
 def _compare_model_performance(checkpoint_model: tuple, new_model: tuple):
     """
@@ -17,7 +17,7 @@ class CheckpointManager:
     def __init__(self, checkpoints_folder, max_checkpoints, best_model_metrics=None):
         self.checkpoints_folder = checkpoints_folder
         self.max_checkpoints = max_checkpoints  # None means keep every checkpoint
-        self.best_model_metrics = best_model_metrics if best_model_metrics is not None else [] # List of (precision, mde, recall, epoch)
+        self.best_model_metrics = best_model_metrics if best_model_metrics is not None else [] # List of (loss, epoch)
 
         if max_checkpoints is None:
             print(f"Keeping every checkpoint in {checkpoints_folder}")

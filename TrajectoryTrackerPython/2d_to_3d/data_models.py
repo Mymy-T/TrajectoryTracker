@@ -67,3 +67,29 @@ class BallState:
     position: np.ndarray
     velocity: np.ndarray
     spin: np.ndarray
+
+@dataclass
+class TrajectoryGenerationSettings:
+    """
+    bounces - Whether bounces will be incorporated into ball trajectory
+    racket_hits - Whether racket hits will be incorprated into ball trajectory
+    position_bounds - Tuple of position vectors that bounds where the position can be sampled from after a racket hit
+    velocity_bounds - Tuple of velocity vectors that bounds where the velocity can be sampled from after a racket hit
+    spin_bounds - Tuple of angular velocity vectors that bounds where the angular velocity can be sampled from after a racket hit
+    num_hits_range - The min and max number of racket hits in a trajectory is racket hits are enabled
+    hit_zone_bounds - Used as bounds to define the hit area if racket hits are enabled; each bound is fractional, ranging from 0 (net) to 1/2 (baseline)
+    """
+    bounces: bool = True
+    racket_hits: bool = False
+    position_bounds: tuple[list, list] = None
+    velocity_bounds: tuple[list, list] = None
+    spin_bounds: tuple[list, list] = None
+    num_hits_range: tuple[int, int] = (2, 5)
+    hit_zone_bounds: tuple[float, float] = (3/8, 1/2)
+
+
+@dataclass
+class CameraConfigSamplingSettings:
+    intrinsics_jitter: float = 5.0
+    translation_jitter: float = 0.3
+    rotation_jitter_deg: float = 2.0

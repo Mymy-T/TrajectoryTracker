@@ -1,5 +1,5 @@
 import cv2
-from data_models import CourtProperties
+from data_models import CourtProperties, CameraConfigSamplingSettings
 from enum import Enum
 import json
 from manual_keypoint_labeler import obtain_keypoints
@@ -141,20 +141,25 @@ def dehomogenize(coords):
 def create_projection_matrix(simplified_intrinsics: np.ndarray, extrinsics: np.ndarray):
     return np.matmul(_expand_intrinsics_matrix(simplified_intrinsics), extrinsics) # https://visionbook.mit.edu/imaging_geometry.html#full-camera-model
 
-
-def sample_camera_config(rng: np.random.Generator, base_intrinsics: np.ndarray, base_extrinsics: np.ndarray, intrinsics_jitter=5.0, translation_jitter=0.3, rotation_jitter_deg=2.0):
+# MARK: Sample Camera Config
+def sample_camera_config(rng: np.random.Generator, base_intrinsics: np.ndarray, base_extrinsics: np.ndarray, sampling_settings=CameraConfigSamplingSettings()):
     """
     Perturbs a base camera's intrinsics and extrinsics
     - intrinsics_jitter - max abs pixels of noise added to each of fx, fy, cx, cy
     - translation_jitter - max abs meters of noise added to T
     - rotation_jitter_deg - max abs degrees of noise applied as a small random rotation, composed on top of the base rotation
     """
+    intrinsics_jitter = sampling_settings.intrinsics_jitter
+    translation_jitter = sampling_settings.translation_jitter
+    rotation_jitter_deg = sampling_settings.rotation_jitter_deg
+    # Intrinsics
     intrinsics = base_intrinsics.copy()
     intrinsics[0, 0] += rng.uniform(-intrinsics_jitter, intrinsics_jitter) # fx
     intrinsics[1, 1] += rng.uniform(-intrinsics_jitter, intrinsics_jitter) # fy
     intrinsics[0, 2] += rng.uniform(-intrinsics_jitter, intrinsics_jitter) # cx
     intrinsics[1, 2] += rng.uniform(-intrinsics_jitter, intrinsics_jitter) # cy
 
+    # Extrinsics
     base_r_matrix = base_extrinsics[0:3, 0:3]
     base_t_vec = base_extrinsics[0:3, 3]
 
@@ -186,29 +191,6 @@ def project_trajectory_to_2d(trajectory: np.ndarray, projection_matrix: np.ndarr
 
 if __name__ == "__main__":
     paths = Paths()
-
-    # intrinsics = np.array([
-    #     [1279.2994, 0, 956.8706],
-    #     [0, 1279.2994, 550.0753],
-    #     [0, 0, 1]
-    # ]).astype(np.float32)
-
-    # image_points = np.array([
-    #     [759, 603], # Top left
-    #     [1112, 604], # Top right
-    #     [18, 881], # Bottom left
-    #     [1796, 883] # Bottom right
-    # ]).astype(np.float32)
-
-    # keypoint_path = paths.saved_keypoints_path
-    # if os.path.exists(keypoint_path):
-    #     image_points = np.load(keypoint_path)
-    # else:
-    #     obtain_keypoints(verbose=True)
-    #     image_points = np.load(keypoint_path)
-
-    # intrinsics = obtain_base_intrinsics(paths.base_intrinsics_path)
-    # extrinsics = obtain_extrinsics(WorldCoordSet.INNER_BASELINE, image_points, intrinsics, verbose=True)
 
     intrinsics, extrinsics = get_base_camera_config()
 

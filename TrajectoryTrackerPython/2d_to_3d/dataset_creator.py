@@ -1,10 +1,11 @@
 import numpy as np
 import os
 import pandas as pd
-from torch import full
 from physics import generate_random_trajectory
 from paths import Paths
 import projector as proj
+from settings import SyntheticDataGeneration
+from tqdm import tqdm
 
 
 def _remove_path_before(full_path, first_part_to_keep):
@@ -18,17 +19,17 @@ def _remove_path_before(full_path, first_part_to_keep):
 
 
 
-def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, timestep=0.01, bounces=True, hits=True):
+def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, timestep=0.001):
     """
-    Generates a synthetic dataset of (camera config, 3D trajectory, 2D projected trajectory) instances.
+    Generates a synthetic dataset of (camera config, 3D trajectory, 2D projected trajectory) instances
 
     For each of num_camera_configs randomly sampled camera configs (centered around a fixed base config):
         Generate trajectories_per_config random 3D trajectories
         Project to to 2D
         Save both the 3D and 2D trajectory as .npy files
         One row per example  written to csv file
-
     """
+
     rng = np.random.default_rng(seed)
     base_intrinsics, base_extrinsics = proj.get_base_camera_config()
 
@@ -45,14 +46,14 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
 
 
     rows = []
-    for camera_config_id in range(num_camera_configs):
+    for camera_config_id in tqdm(range(data_gen_settings.num_camera_configs), desc="Camera configs"):
 
         intrinsics, extrinsics = proj.sample_camera_config(rng, base_intrinsics, base_extrinsics)
         projection_matrix = proj.create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
 
-        for trajectory_id in range(trajectories_per_config):
+        for trajectory_id in tqdm(range(data_gen_settings.trajectories_per_config), desc=f"Trajectories for camera config {camera_config_id}", leave=False):
 
-            trajectory, times, eot = generate_random_trajectory(rng, timestep=timestep, bounces=bounces, racket_hits=hits)
+            trajectory, times, eot = generate_random_trajectory(rng, timestep=timestep, generation_settings=data_gen_settings.trajectory_generation_settings)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
 
             example_id = f"camera_config_{camera_config_id:04d}__trajectory_{trajectory_id:04d}"
@@ -78,8 +79,8 @@ def create_dataset(num_camera_configs=5, trajectories_per_config=10, seed=0, tim
                 "trajectory_eot_path": _remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot"),
                 "num_points": len(trajectory),
                 "timestep": timestep,
-                "bounces": bounces,
-                "hits": hits
+                "bounces": data_gen_settings.trajectory_generation_settings.bounces,
+                "hits": data_gen_settings.trajectory_generation_settings.racket_hits
             })
 
     df = pd.DataFrame(rows)

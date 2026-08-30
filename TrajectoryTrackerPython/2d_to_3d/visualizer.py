@@ -208,8 +208,7 @@ def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
         [-sw/2, -sw/2],
         [0, 0],
         color="green",
-        linewidth=1,
-        label="Court Lines"
+        linewidth=1
     )
 
     ax.plot(
@@ -218,7 +217,6 @@ def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
         [0, 0],
         color="green",
         linewidth=1,
-        label="Court Lines"
     )
 
     # Net line (across X = 0)

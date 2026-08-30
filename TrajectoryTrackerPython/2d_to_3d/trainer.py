@@ -7,9 +7,9 @@ import time
 import torch
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
-import train_settings
+import settings
 
-device = train_settings.device
+device = settings.device
 
 
 def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name, resuming, verbose=True, max_train_seconds=None, train_dataset=None, valid_dataset=None, test_dataset=None):

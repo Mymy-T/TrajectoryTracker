@@ -1,5 +1,5 @@
 import copy
-from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties
+from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, TrajectoryGenerationSettings
 from enum import Enum
 import math
 import numpy as np
@@ -11,7 +11,7 @@ class TrajectoryMode(Enum):
     BOUNCE_ONLY = "bounce_only"    # a single shot with up to max_bounces ground bounces
     BOUNCE_AND_HIT = "bounce_and_hit"  # a multi-hit rally (ground bounces + racket hits)
 
-
+# MARK: Physics Simulator
 class PhysicsSimulation():
     """
     Class for simulating ball trajectories. The simulator's copy of the initial ball state will be modified in place.
@@ -415,6 +415,7 @@ def _resolve_trajectory_mode(bounces, racket_hits):
     return TrajectoryMode.BOUNCE_AND_HIT if racket_hits else TrajectoryMode.BOUNCE_ONLY
 
 
+# MARK: Example Trajectory
 def generate_sample_trajectory(timestep=0.001, bounces=True, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, rng: np.random.Generator = None):
     court_properties = CourtProperties()
     l = court_properties.court_length
@@ -428,7 +429,8 @@ def generate_sample_trajectory(timestep=0.001, bounces=True, racket_hits=False, 
     return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, end_time
 
 
-def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces=True, position_bounds=None, velocity_bounds=None, spin_bounds=None, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4):
+# MARK: Random Trajectory
+def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, generation_settings=TrajectoryGenerationSettings(), bounce_trigger_cap=3, max_bounces=4):
     """
     Same as generate_sample_trajectory, but the initial ball state is sampled at random
 
@@ -439,7 +441,10 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces
     court_properties = CourtProperties()
     l = court_properties.court_length
     w = court_properties.court_width
-
+    
+    position_bounds = generation_settings.position_bounds
+    velocity_bounds = generation_settings.velocity_bounds
+    spin_bounds = generation_settings.spin_bounds
     if position_bounds is None:
         position_bounds = ([-l/2, 0.5, -w/2], [-l/2, 1.5, w/2])
     if velocity_bounds is None:
@@ -454,13 +459,13 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, bounces
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
     simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep, rng=rng)
 
-    mode = _resolve_trajectory_mode(bounces, racket_hits)
-    return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times
+    mode = _resolve_trajectory_mode(generation_settings.bounces, generation_settings.racket_hits)
+    return simulation.compute_3d_trajectory(mode=mode, num_hits_range=generation_settings.num_hits_range, hit_zone_bounds=generation_settings.hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times, eot
 
 
 if __name__ == "__main__":
 
-    trajectory, end_time = generate_sample_trajectory()
+    trajectory, _, _ = generate_sample_trajectory()
 
     print(f"Num points in trajectory: {len(trajectory)}")
 
