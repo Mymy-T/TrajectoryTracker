@@ -215,10 +215,9 @@ class PhysicsSimulation():
 
         This function doesn't modify ball state in place.
         """
-        ball_properties = BallProperties()
         e = self.bounce_properties.e
         mu = self.bounce_properties.mu
-        R = ball_properties.R
+        R = self.ball_properties.R
         v = self.ball_state.velocity
         w = self.ball_state.spin
 
