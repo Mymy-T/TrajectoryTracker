@@ -64,11 +64,8 @@ def _run_lstm_with_packing(lstm, x, lengths):
 # MARK: Full Network
 class TrajectoryReconstructionNetwork(nn.Module):
 
-    def __init__(self, intrinsics, extrinsics: np.ndarray): # intrinsics is 3 x 3; extrinsincs is 4 x 4
+    def __init__(self): # intrinsics is 3 x 3; extrinsincs is 4 x 4 # TODO: Updated all calls to instantiation
         super().__init__()
-
-        self.register_buffer("intrinsics", torch.as_tensor(intrinsics, dtype=settings.torch_dtype))
-        self.register_buffer("extrinsics", torch.as_tensor(extrinsics, dtype=settings.torch_dtype))
 
         self.eot_network = EOTNetwork()
         self.height_network = HeightNetwork()
@@ -77,13 +74,12 @@ class TrajectoryReconstructionNetwork(nn.Module):
         self.to(dtype=settings.torch_dtype)
 
 
-    def forward(self, x, lengths): # x is (N, L, 2); sequence of image coords; lengths is (N,)
-        x = x.to(dtype=self.intrinsics.dtype)
+    def forward(self, x, lengths, intrinsics: torch.tensor, extrinsics: torch.tensor): # x is (N, L, 2); sequence of image coords; lengths is (N,); intrinsics is (N, 3, 3); extrinsics is (N, 4, 4)
         lengths = lengths.to(x.device)
         L = x.shape[1]
         mask = _build_validity_mask(lengths, L) # (N, L)
 
-        c, d = self.obtain_ray_representation(x)
+        c, d = self.obtain_ray_representation(x, intrinsics, extrinsics)
         p = self.obtain_intersection_representation(c, d) # (N, L, 4)
         p = _mask(p, mask) # Zero out padded positions
 
@@ -108,32 +104,34 @@ class TrajectoryReconstructionNetwork(nn.Module):
         return final_coords, epsilons # (N, L, 3), (N, L, 1)
 
 
-    def obtain_ray_representation(self, x: torch.Tensor):
+    def obtain_ray_representation(self, x: torch.Tensor, intrinsics: torch.tensor, extrinsics: torch.tensor):
         """
         x is (N, L, 2); sequence of image coords
+        intrinsics is (N, 3, 3)
+        extrinsics is (N, 4, 4)
         Returns c, d; both of shapes (N, L, 3)
         """
         N, L = x.shape[0], x.shape[1]
-        E_inv = torch.linalg.inv(self.extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
+        E_inv = torch.linalg.inv(extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
 
         origin_homogeneous = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=E_inv.dtype, device=E_inv.device)
-        c_single = dehomogenize(torch.matmul(E_inv, origin_homogeneous)) # (3,)
-        c = c_single.view(1, 1, 3).expand(N, L, 3) # (N, L, 3)
+        c_batch = dehomogenize(torch.matmul(E_inv, origin_homogeneous)) # (N, 3)
+        c = c_batch.unsqueeze(1).expand(N, L, 3)  # (N, L, 3)
 
-        fx = self.intrinsics[0, 0]
-        fy = self.intrinsics[1, 1]
-        cx = self.intrinsics[0, 2]
-        cy = self.intrinsics[1, 2]
+        fx = intrinsics[:, 0, 0].unsqueeze(-1)  # (N, 1)
+        fy = intrinsics[:, 1, 1].unsqueeze(-1)
+        cx = intrinsics[:, 0, 2].unsqueeze(-1)
+        cy = intrinsics[:, 1, 2].unsqueeze(-1)
 
-        d_X_cam = (x[:, :, 0] - cx) / fx # (N, L)
-        d_Y_cam = (x[:, :, 1] - cy) / fy # (N, L)
+        d_X_cam = (x[:, :, 0] - cx) / fx  # (N, L)
+        d_Y_cam = (x[:, :, 1] - cy) / fy  # (N, L)
         d_Z_cam = torch.ones((N, L), dtype=x.dtype, device=x.device)
         d_extra_cam = torch.zeros((N, L), dtype=x.dtype, device=x.device) # Homogeneous direction coord
         d_cam = torch.stack((d_X_cam, d_Y_cam, d_Z_cam, d_extra_cam), dim=-1) # (N, L, 4)
         d_cam = d_cam.unsqueeze(-1) # (N, L, 4, 1)
 
-        # Squeeze because matmul final shape is (N, L, 4, 1); E_inv changes from (4, 4) to (N, L, 4, 4) by broadcasting
-        d = dehomogenize(torch.matmul(E_inv, d_cam).squeeze(-1)) # (N, L, 3)
+        # Squeeze because matmul final shape is (N, L, 4, 1); E_inv changes from (N, 1, 4, 4) to (N, L, 4, 4) by broadcasting
+        d = dehomogenize(torch.matmul(E_inv.unsqueeze(1), d_cam).squeeze(-1)) # (N, L, 3)
 
         return c, d
 

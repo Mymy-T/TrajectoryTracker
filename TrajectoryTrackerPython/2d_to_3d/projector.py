@@ -56,7 +56,7 @@ def obtain_base_intrinsics(filepath):
     cx = data["cx"]
     cy = data["cy"]
 
-    intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float32)
+    intrinsics = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]], dtype=np.float64)
 
     return intrinsics
 
@@ -78,7 +78,7 @@ def obtain_extrinsics(coord_set: WorldCoordSet, image_points: np.ndarray, intrin
             print(f"Camera position (in world coords): \n{-np.matmul(np.transpose(r_matrix), t_vec)}")
 
         # t_vec is the position of the world origin from camera POV; therefore, t_vec is in camera frame and t_vec = R(P_w - t) = R(0 - t) = -Rt where R is 3 x 3 and t is 3 x 1 (simplified or heterogeneous form)
-        extrinsics = np.identity(4, dtype=np.float32)
+        extrinsics = np.identity(4, dtype=np.float64)
         extrinsics[0:3, 0:3] = r_matrix
         extrinsics[0:3, 3] = t_vec.flatten() # Last col of extrinsic matrix is -Rt = t_vec
         return extrinsics

@@ -151,12 +151,15 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         if idx < resume_batch_idx:
             continue
 
-        inputs = batch[0].to(device)
-        coord_labels = batch[1].to(device)
-        eot_labels = batch[2].to(device)
-        lengths = batch[3].to(device)
+        inputs = batch[0].to(device) # (N, L, 2)
+        coord_labels = batch[1].to(device) # (N, L, 3)
+        eot_labels = batch[2].to(device) # (N, L, 1)
+        lengths = batch[3].to(device) # (N,)
+        intrinsics = batch[4].to(device) # (N, 3, 3)
+        extrinsics = batch[5].to(device) # (N, 4, 4)
 
-        pred_coords, pred_eot = model(inputs, lengths)
+
+        pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics)
 
         loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
         loss.backward() # Accumulates gradients if zero grad isn't called
@@ -223,8 +226,10 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
             coord_labels = batch[1].to(device) # (N, L, 3)
             eot_labels = batch[2].to(device) # (N, L, 1)
             lengths = batch[3].to(device) # (N,)
+            intrinsics = batch[4].to(device) # (N, 3, 3)
+            extrinsics = batch[5].to(device) # (N, 4, 4)
 
-            pred_coords, pred_eot = model(inputs, lengths) # (N, L, 3), (N, L, 1)
+            pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 3), (N, L, 1)
 
             loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
 
