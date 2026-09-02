@@ -4,6 +4,7 @@ import os
 import pandas as pd
 from paths import Paths
 import settings
+from statistics import NormalDist
 import torch
 from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import Dataset, DataLoader
@@ -53,7 +54,7 @@ def obtain_extrinsics(extrinsic_elements: list):
 
 class TrajectoryReconstructionDataset(Dataset):
 
-    def __init__(self, mode: DatasetType):
+    def __init__(self, mode: DatasetType, noise_2d: bool, noise_bound=10.0, within_noise_bound_prob=0.95, seed=0):
         paths = Paths()
         if mode == DatasetType.train:
             dataset_type = "train"
@@ -64,6 +65,13 @@ class TrajectoryReconstructionDataset(Dataset):
 
         self.data_df = pd.read_csv(os.path.join(paths.dataset_csv_folder, f"{dataset_type}_data.csv"))
         self.data_folder = paths.synthetic_data_folder
+
+        self.noise_2d = noise_2d
+        self.rng = np.random.default_rng(seed) # Used for adding random noise
+        std_norm_dist = NormalDist(0, 1)
+        p = within_noise_bound_prob/2 + 0.5
+        self.sigma = noise_bound / std_norm_dist.inv_cdf(p)
+
 
 
     def __len__(self):
@@ -89,10 +97,15 @@ class TrajectoryReconstructionDataset(Dataset):
         trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)).to(dtype=settings.torch_dtype) # (L, 3)
         trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1).to(dtype=settings.torch_dtype) # (L, 1)
 
+        if self.noise_2d:
+            trajectory_noise_2d = torch.from_numpy(self.rng.normal(loc=0.0, scale=self.sigma, size=trajectory_2d.shape)).to(dtype=settings.torch_dtype)
+            trajectory_2d += trajectory_noise_2d
+
+
         return (trajectory_2d, trajectory_3d, trajectory_eot), (intrinsics, extrinsics)
     
 if __name__ == "__main__":
-    data = TrajectoryReconstructionDataset(DatasetType.valid) # Data has shape (N, x, y) where y = 3 if x = 1 and y = 2 if x = 2
+    data = TrajectoryReconstructionDataset(DatasetType.valid, noise_2d=False) # Data has shape (N, x, y) where y = 3 if x = 1 and y = 2 if x = 2
     print(f"Input shape: {data[0][0][0].shape}")
     print(f"Label shape: {data[0][0][1].shape}")
     print("\n")

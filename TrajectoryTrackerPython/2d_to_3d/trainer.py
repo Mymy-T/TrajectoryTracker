@@ -44,9 +44,9 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
     resume_manager = ResumeCheckpointManager(resume_checkpoint_path)
 
     # Datasets
-    train_data = train_dataset if train_dataset is not None else TrajectoryReconstructionDataset(DatasetType.train)
-    valid_data = valid_dataset if valid_dataset is not None else TrajectoryReconstructionDataset(DatasetType.valid)
-    test_data = test_dataset if test_dataset is not None else TrajectoryReconstructionDataset(DatasetType.test)
+    train_data = train_dataset if train_dataset is not None else TrajectoryReconstructionDataset(DatasetType.train, noise_2d=True)
+    valid_data = valid_dataset if valid_dataset is not None else TrajectoryReconstructionDataset(DatasetType.valid, noise_2d=True)
+    test_data = test_dataset if test_dataset is not None else TrajectoryReconstructionDataset(DatasetType.test, noise_2d=True)
 
     data_generator = torch.Generator() # Custom generator allows for saving train dataloader state
     sampler = RandomSampler(train_data, generator=data_generator)
