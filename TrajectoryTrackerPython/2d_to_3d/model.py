@@ -1,3 +1,5 @@
+from networkx import diameter
+from data_models import BallProperties
 import numpy as np
 from projector import dehomogenize
 import settings
@@ -74,7 +76,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         self.to(dtype=settings.torch_dtype)
 
 
-    def forward(self, x, lengths, intrinsics: torch.tensor, extrinsics: torch.tensor): # x is (N, L, 2); sequence of image coords; lengths is (N,); intrinsics is (N, 3, 3); extrinsics is (N, 4, 4)
+    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor): # x is (N, L, 2); sequence of image coords; lengths is (N,); intrinsics is (N, 3, 3); extrinsics is (N, 4, 4)
         lengths = lengths.to(x.device)
         L = x.shape[1]
         mask = _build_validity_mask(lengths, L) # (N, L)
@@ -104,7 +106,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         return final_coords, epsilons # (N, L, 3), (N, L, 1)
 
 
-    def obtain_ray_representation(self, x: torch.Tensor, intrinsics: torch.tensor, extrinsics: torch.tensor):
+    def obtain_ray_representation(self, x: torch.Tensor, intrinsics: torch.Tensor, extrinsics: torch.Tensor):
         """
         x is (N, L, 2); sequence of image coords
         intrinsics is (N, 3, 3)
@@ -149,6 +151,39 @@ class TrajectoryReconstructionNetwork(nn.Module):
         pv_z = c_z - c_x * _safe_divide(d_z, d_x) # (N, L)
 
         return torch.stack((pg_x, pg_z, pv_y, pv_z), dim=-1) # (N, L, 4)
+    
+
+    def estimate_height_from_diameters(self, c: torch.Tensor, d: torch.Tensor, diameters: torch.Tensor, intrinsics: torch.Tensor):
+        """
+        c & d are (N, L, 3)
+        diameters is (N, 2); first and last for each trajectory
+        intrinsics is (N, 3, 3)
+        Returns h, which is (N, 2), and contains estimated initial and final heights for each trajectory
+        """
+        true_diameter = 2 * BallProperties().R
+
+        fx = intrinsics[:, 0, 0].unsqueeze(-1)  # (N, 1)
+        fy = intrinsics[:, 1, 1].unsqueeze(-1)
+        f = (fx + fy) / 2
+
+        s = (f * true_diameter) / diameters # (N, 2)
+
+        c_first = c[:, 0, :] # All (N, 3)
+        d_first = d[:, 0, :]
+        c_last = c[:, -1, :]
+        d_last = d[:, -1, :]
+
+        s_first = s[:, 0].unsqueeze(-1) # Both (N, 1)
+        s_last = s[:, -1].unsqueeze(-1)
+
+        first_coords = c_first + d_first * s_first # Both (N, 3)
+        last_coords = c_last + d_last * s_last
+
+        h_first = first_coords[:, 1] # Both (N,)
+        h_last = last_coords[:, 1]
+        h = torch.stack((h_first, h_last), dim=-1) # (N, 2)
+
+        return h # (N, 2)
 
 
     def obtain_coords_from_height(self, c: torch.Tensor, d: torch.Tensor, h: torch.Tensor):
