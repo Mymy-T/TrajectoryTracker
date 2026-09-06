@@ -39,10 +39,12 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, timestep
     trajectories_3d_folder = os.path.join(dataset_folder, "trajectories_3d")
     trajectories_2d_folder = os.path.join(dataset_folder, "trajectories_2d")
     trajectories_eot_folder = os.path.join(dataset_folder, "trajectories_eot")
+    trajectories_diameter_folder = os.path.join(dataset_folder, "trajectories_diameter")
 
     os.makedirs(trajectories_3d_folder, exist_ok=True)
     os.makedirs(trajectories_2d_folder, exist_ok=True)
     os.makedirs(trajectories_eot_folder, exist_ok=True)
+    os.makedirs(trajectories_diameter_folder, exist_ok=True)
 
 
     rows = []
@@ -55,16 +57,20 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, timestep
 
             trajectory, times, eot = generate_random_trajectory(rng, timestep=timestep, generation_settings=data_gen_settings.trajectory_generation_settings)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
+            diameters = proj.obtain_projected_diameters(trajectory, intrinsics, extrinsics)
 
             example_id = f"camera_config_{camera_config_id:04d}__trajectory_{trajectory_id:04d}"
 
             trajectory_3d_path = os.path.join(trajectories_3d_folder, f"{example_id}.npy")
             trajectory_2d_path = os.path.join(trajectories_2d_folder, f"{example_id}.npy")
             trajectory_eot_path = os.path.join(trajectories_eot_folder, f"{example_id}.npy")
+            trajectory_diameter_path = os.path.join(trajectories_diameter_folder, f"{example_id}.npy")
 
             np.save(trajectory_3d_path, trajectory)
             np.save(trajectory_2d_path, projected_trajectory)
             np.save(trajectory_eot_path, eot)
+            np.save(trajectory_diameter_path, diameters)
+
 
             rows.append({
                 "camera_config_id": camera_config_id,
@@ -77,6 +83,7 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, timestep
                 "trajectory_3d_path": _remove_path_before(full_path=trajectory_3d_path, first_part_to_keep="trajectories_3d"),
                 "trajectory_2d_path": _remove_path_before(full_path=trajectory_2d_path, first_part_to_keep="trajectories_2d"),
                 "trajectory_eot_path": _remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot"),
+                "trajectory_diameter_path": _remove_path_before(full_path=trajectory_diameter_path, first_part_to_keep="trajectories_diameter"),
                 "num_points": len(trajectory),
                 "timestep": timestep,
                 "bounces": data_gen_settings.trajectory_generation_settings.bounces,

@@ -15,9 +15,10 @@ class DatasetType(Enum):
     test = 2
 
 
-def homogenize_seq_length(batch):
+def collate_func(batch):
     sequences = [batch[i][0] for i in range(len(batch))] # [(i1, o1, el1), (i2, o2, el2), ...]
     cam_configs = [batch[i][1] for i in range(len(batch))] # [(intrinsics_1, extrinsics_1), (intrinsics_2, extrinsics_2), ...]
+    diameters = [batch[i][2] for i in range(len(batch))] # [diameters_1, diameters_2, ...]
 
     inputs, outputs, eot_labels = zip(*sequences) # [(i1, o1, el1), (i2, o2, el2), ...] -> [(i1, i2, ...), (o1, o2, ...), (el1, el2, ...)]
     intrinsics, extrinsics = zip(*cam_configs) # [(intrinsics_1, extrinsics_1), (intrinsics_2, extrinsics_2), ...] -> [(intrinsics_1, intrinsics_2, ...), (extrinsics_1, extrinsics_2, ...)]
@@ -25,13 +26,15 @@ def homogenize_seq_length(batch):
     intrinsics = torch.stack(intrinsics) # (N, 3, 3)
     extrinsics = torch.stack(extrinsics) # (N, 4, 4)
 
+    diameters = torch.stack(diameters) # (N, 2)
+
     lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths; shape of lengths is (N,)
     
     padded_inputs = pad_sequence(inputs, batch_first=True, padding_value=0.0)
     padded_outputs = pad_sequence(outputs, batch_first=True, padding_value=0.0)
     padded_eot_labels = pad_sequence(eot_labels, batch_first=True, padding_value=0.0)
     
-    return padded_inputs, padded_outputs, padded_eot_labels, lengths, intrinsics, extrinsics
+    return padded_inputs, padded_outputs, padded_eot_labels, lengths, intrinsics, extrinsics, diameters
 
 
 def obtain_intrinsics(fx, fy, cx, cy):
@@ -92,17 +95,19 @@ class TrajectoryReconstructionDataset(Dataset):
         trajectory_3d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_3d_path"])
         trajectory_2d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_2d_path"])
         trajectory_eot_path = os.path.join(self.data_folder, selected_example.loc["trajectory_eot_path"])
+        trajectory_diameter_path = os.path.join(self.data_folder, selected_example.loc["trajectory_diameter_path"])
         
         trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path)).to(dtype=settings.torch_dtype) # (L, 2)
         trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)).to(dtype=settings.torch_dtype) # (L, 3)
         trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1).to(dtype=settings.torch_dtype) # (L, 1)
+        trajectory_diameters = torch.from_numpy(np.load(trajectory_diameter_path)).to(dtype=settings.torch_dtype) # (2,)
 
         if self.noise_2d:
             trajectory_noise_2d = torch.from_numpy(self.rng.normal(loc=0.0, scale=self.sigma, size=trajectory_2d.shape)).to(dtype=settings.torch_dtype)
             trajectory_2d += trajectory_noise_2d
 
 
-        return (trajectory_2d, trajectory_3d, trajectory_eot), (intrinsics, extrinsics)
+        return (trajectory_2d, trajectory_3d, trajectory_eot), (intrinsics, extrinsics), trajectory_diameters
     
 if __name__ == "__main__":
     data = TrajectoryReconstructionDataset(DatasetType.valid, noise_2d=False) # Data has shape (N, x, y) where y = 3 if x = 1 and y = 2 if x = 2
@@ -111,7 +116,7 @@ if __name__ == "__main__":
     print("\n")
     print(f"Num examples in dataset: {data.__len__()}")
 
-    dataloader = DataLoader(data, batch_size=3, shuffle=True, collate_fn=homogenize_seq_length) # Batch has shape (6, N, L, D)
+    dataloader = DataLoader(data, batch_size=3, shuffle=True, collate_fn=collate_func) # Batch has shape (7, N, L, D)
     batch = next(iter(dataloader))
     print("\n")
     print(f"Batch number of variables: {len(batch)}")
@@ -121,3 +126,4 @@ if __name__ == "__main__":
     print(f"Lengths array: {batch[3]}")
     print(f"Intrinsics: {batch[4].shape}")
     print(f"Extrinsics: {batch[5].shape}")
+    print(f"Initial Heights: {batch[6].shape}")

@@ -1,8 +1,9 @@
 import cv2
-from data_models import CourtProperties, CameraConfigSamplingSettings
+from data_models import CourtProperties, CameraConfigSamplingSettings, BallProperties
 from enum import Enum
 import json
 from manual_keypoint_labeler import obtain_keypoints
+import math
 import numpy as np
 import os
 from paths import Paths
@@ -188,6 +189,56 @@ def project_trajectory_to_2d(trajectory: np.ndarray, projection_matrix: np.ndarr
 
     return np.stack(projected_trajectory, axis=0).astype(np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
+
+def obtain_projected_diameters(trajectory: np.ndarray, intrinsics: np.ndarray, extrinsics: np.ndarray):
+    """
+    trajectory is ndarray of 3D points
+    intrinsics is (3, 3) ndarray
+    extrinsics is (4, 4) ndarray
+    Returns a (2,) ndarray of the diameters for the initial and final frames
+    """
+
+    r = BallProperties().R
+
+    r_matrix = extrinsics[0:3, 0:3] # (3, 3)
+    t_vec = extrinsics[0:3, 3:] # (3, 1)
+    T = np.squeeze(np.matmul(-r_matrix.T, t_vec), axis=-1) # t_vec = -RT -> T = -R^T t_vec since R is orthogonal; T is (3,)
+
+    def obtain_projected_diameter(S, C):
+        """
+        Both are (3,); S is the center of ball, C is camera position; everything in world coords
+        """
+
+        CS = S - C
+
+        Y = np.array([0, 1, 0]) # Any vector in world coords not parallel to CS works
+
+        c_hat = CS / np.linalg.norm(CS)
+        
+        D = Y - (np.dot(Y, CS) / np.linalg.norm(CS)) * c_hat
+        d_hat = D / np.linalg.norm(D)
+
+        point_1 = S + r * math.sqrt(1 - (r / np.linalg.norm(CS))**2) * d_hat - (r**2 / np.linalg.norm(CS)) * c_hat # Both (3,)
+        point_2 = S - r * math.sqrt(1 - (r / np.linalg.norm(CS))**2) * d_hat - (r**2 / np.linalg.norm(CS)) * c_hat
+
+        projection_matrix = create_projection_matrix(intrinsics, extrinsics)
+        homogeneous_point_1 = homogenize(point_1)
+        homogeneous_point_2 = homogenize(point_2)
+
+        projected_point_1 = dehomogenize(np.matmul(projection_matrix, homogeneous_point_1)) # Both (2,)
+        projected_point_2 = dehomogenize(np.matmul(projection_matrix, homogeneous_point_2))
+
+        diameter = np.linalg.norm(projected_point_1 - projected_point_2)
+        return diameter
+    
+
+    first_point = trajectory[0, :] # Both (3,)
+    last_point = trajectory[-1, :]
+
+    d_o = obtain_projected_diameter(S=first_point, C=T)
+    d_f = obtain_projected_diameter(S=last_point, C=T)
+
+    return np.array([d_o, d_f]).astype(np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 if __name__ == "__main__":
     paths = Paths()

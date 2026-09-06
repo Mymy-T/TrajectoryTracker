@@ -26,9 +26,12 @@ def _build_validity_mask(lengths, max_len, remove_last_step=False):
 
 def _reverse_valid_prefix(x, lengths):
     """
+    Inputs
     -  x is (N, L, D)
     - lengths is (N,)
-    Returns reversed sequence, ignoring padding (which remains at end)
+
+    Returns
+    - A reversed sequence, ignoring padding (which remains at end)
     """
     N, L, D = x.shape[0], x.shape[1], x.shape[2]
 
@@ -76,7 +79,14 @@ class TrajectoryReconstructionNetwork(nn.Module):
         self.to(dtype=settings.torch_dtype)
 
 
-    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor): # x is (N, L, 2); sequence of image coords; lengths is (N,); intrinsics is (N, 3, 3); extrinsics is (N, 4, 4)
+    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor, diameters: torch.Tensor):
+        """
+        x is (N, L, 2); sequence of image coords
+        lengths is (N,)
+        intrinsics is (N, 3, 3)
+        extrinsics is (N, 4, 4)
+        diameters is (N, 2)
+        """
         lengths = lengths.to(x.device)
         L = x.shape[1]
         mask = _build_validity_mask(lengths, L) # (N, L)
@@ -92,7 +102,9 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         eot_input = delta_p # (N, L, 4)
         epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
-        heights = self.height_network(p, delta_p, epsilons, lengths) # (N, L, 1)
+
+        boundary_heights = self.estimate_height_from_diameters(c, d, diameters, intrinsics, lengths) # (N, 2)
+        heights = self.height_network(p, delta_p, epsilons, lengths, boundary_heights) # (N, L, 1)
 
         coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords; (N, L, 3)
 
@@ -153,13 +165,19 @@ class TrajectoryReconstructionNetwork(nn.Module):
         return torch.stack((pg_x, pg_z, pv_y, pv_z), dim=-1) # (N, L, 4)
     
 
-    def estimate_height_from_diameters(self, c: torch.Tensor, d: torch.Tensor, diameters: torch.Tensor, intrinsics: torch.Tensor):
+    def estimate_height_from_diameters(self, c: torch.Tensor, d: torch.Tensor, diameters: torch.Tensor, intrinsics: torch.Tensor, lengths: torch.Tensor):
         """
-        c & d are (N, L, 3)
-        diameters is (N, 2); first and last for each trajectory
-        intrinsics is (N, 3, 3)
-        Returns h, which is (N, 2), and contains estimated initial and final heights for each trajectory
+        Inputs
+        - c & d are (N, L, 3)
+        - diameters is (N, 2); first and last for each trajectory; in pixels, conversion auto handled by fx and fy
+        - intrinsics is (N, 3, 3)
+
+        Returns
+        - h, which is (N, 2), and contains estimated initial and final heights for each trajectory
         """
+
+        N, L, D = c.shape
+
         true_diameter = 2 * BallProperties().R
 
         fx = intrinsics[:, 0, 0].unsqueeze(-1)  # (N, 1)
@@ -168,10 +186,12 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         s = (f * true_diameter) / diameters # (N, 2)
 
+        end_indices = (lengths - 1).view(N, 1, 1).expand(N, 1, D)
+
         c_first = c[:, 0, :] # All (N, 3)
         d_first = d[:, 0, :]
-        c_last = c[:, -1, :]
-        d_last = d[:, -1, :]
+        c_last = torch.gather(c, dim=1, index=end_indices).squeeze(1)
+        d_last = torch.gather(d, dim=1, index=end_indices).squeeze(1)
 
         s_first = s[:, 0].unsqueeze(-1) # Both (N, 1)
         s_last = s[:, -1].unsqueeze(-1)
@@ -264,10 +284,14 @@ class HeightDeltaLSTM(nn.Module):
             fc_3
         )
 
-    def forward(self, x_reduced): # x_reduced has shape (N, L, 5)
+    def forward(self, x_reduced, boundary_heights):
+        """
+        - x_reduced is (N, L, 5) and contains both delta_p and epsilon
+        - boundary_heights is (N,)
+        """
         N, L, _ = x_reduced.shape
 
-        h = torch.zeros((N, 1), dtype=x_reduced.dtype, device=x_reduced.device)
+        h = boundary_heights.unsqueeze(-1).to(x_reduced.device) # (N, 1)
 
         heights = []
 
@@ -287,7 +311,7 @@ class HeightDeltaLSTM(nn.Module):
             delta_h_t = delta_h_t.squeeze(1) # (N, 1)
 
             heights.append(h) # Assumes the initial height is 0
-            h = h + delta_h_t # Avoid += to avoid mutating the tensor already referenced in heights
+            h = h + delta_h_t
 
         heights_tensor = torch.stack(heights, dim=1) # (N, L, 1)
 
@@ -340,14 +364,27 @@ class HeightNetwork(nn.Module):
         self.lstm_b = HeightDeltaLSTM()
         self.lstm_height = HeightLSTM()
 
-    def forward(self, p, delta_p, epsilon, lengths): # p is (N, L, 4), delta_p is (N, L, 4), epsilon is (N, L, 1); lengths is (N,)
+    def forward(self, p, delta_p, epsilon, lengths, boundary_heights):
+        """
+        Inputs
+        - p, delta_p are (N, L, 4)
+        - epsilon is (N, L, 1)
+        - lengths is (N,)
+        - boundary_heights is (N, 2)
+
+        Returns
+        - h_refined, which is (N, L, 1) and a first estimate of the height
+        """
         N, L = p.shape[0], p.shape[1]
 
-        lstm_f_input = torch.concatenate((delta_p, epsilon), dim=-1) # (N, L, 5); initial height feature added inside implmentation of HeightDeltaLSTM
-        lstm_b_input = _reverse_valid_prefix(lstm_f_input, lengths)
+        lstm_f_initial_heights = boundary_heights[:, 0] # Both (N,)
+        lstm_b_initial_heights = boundary_heights[:, 1]
 
-        h_f = self.lstm_f(lstm_f_input) # (N, L, 1)
-        h_b = self.lstm_b(lstm_b_input) # (N, L, 1); accumulated in reversed order
+        lstm_f_input = (torch.concatenate((delta_p, epsilon), dim=-1), lstm_f_initial_heights) # torch concatenate part is (N, L, 5)
+        lstm_b_input = (_reverse_valid_prefix(lstm_f_input[0], lengths), lstm_b_initial_heights)
+
+        h_f = self.lstm_f(*lstm_f_input) # (N, L, 1)
+        h_b = self.lstm_b(*lstm_b_input) # (N, L, 1); accumulated in reversed order
         h_b = _reverse_valid_prefix(h_b, lengths) # Reverse it again back to proper order
 
         positions = torch.arange(L, device=p.device, dtype=p.dtype).unsqueeze(0) # (1, L); zero-indexed

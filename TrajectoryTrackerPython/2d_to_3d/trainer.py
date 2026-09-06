@@ -1,5 +1,5 @@
 from checkpointing import CheckpointManager, ResumeCheckpointManager, LossLog
-from dataset import TrajectoryReconstructionDataset, DatasetType, homogenize_seq_length
+from dataset import TrajectoryReconstructionDataset, DatasetType, collate_func
 from loss import FullLoss
 import os
 from paths import Paths
@@ -52,9 +52,9 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
     sampler = RandomSampler(train_data, generator=data_generator)
 
     running_on_cpu = (device.type == "cpu") # Pin memory if a gpu is present; this prevents allocated tensors from being moved to disk, speeding up how fast the tensors can be forwarded to the gpu
-    train_dataloader = DataLoader(train_data, batch_size=batch_size, sampler=sampler, pin_memory=(not running_on_cpu), collate_fn=homogenize_seq_length) # Use custom sampler
-    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, pin_memory=(not running_on_cpu), collate_fn=homogenize_seq_length)
-    test_dataloader = DataLoader(test_data, batch_size=batch_size, pin_memory=(not running_on_cpu), collate_fn=homogenize_seq_length)
+    train_dataloader = DataLoader(train_data, batch_size=batch_size, sampler=sampler, pin_memory=(not running_on_cpu), collate_fn=collate_func) # Use custom sampler
+    valid_dataloader = DataLoader(valid_data, batch_size=batch_size, pin_memory=(not running_on_cpu), collate_fn=collate_func)
+    test_dataloader = DataLoader(test_data, batch_size=batch_size, pin_memory=(not running_on_cpu), collate_fn=collate_func)
 
     # Optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -157,9 +157,10 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         lengths = batch[3].to(device) # (N,)
         intrinsics = batch[4].to(device) # (N, 3, 3)
         extrinsics = batch[5].to(device) # (N, 4, 4)
+        diameters = batch[6].to(device) # (N, 2)
 
 
-        pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics)
+        pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters)
 
         loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
         loss.backward() # Accumulates gradients if zero grad isn't called
@@ -228,8 +229,9 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
             lengths = batch[3].to(device) # (N,)
             intrinsics = batch[4].to(device) # (N, 3, 3)
             extrinsics = batch[5].to(device) # (N, 4, 4)
+            diameters = batch[6].to(device) # (N, 2)
 
-            pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 3), (N, L, 1)
+            pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
 
             loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
 
