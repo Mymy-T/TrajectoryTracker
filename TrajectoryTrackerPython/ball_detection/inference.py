@@ -1,52 +1,135 @@
+import argparse
 import cv2
 from frame_extractor import extract_clip_frames
 import os
 from model import TrackNet
 import numpy as np
 from paths import ProjectPaths
-import sys
+import textwrap
 import torch
 from tqdm import trange
 import train_settings
 
 # TODO: Create an mp4 video of the heatmaps too (before threshold is applied)
 
-# <> -> required input; [] -> optional input
-# USAGE: python3 inference.py <model_name> <preexisting_video> [inference_video_folder] [sample_video_name]
-# NOTE: inference_video_name and sample_video_name are mutually exclusive; specify inference_video_folder if you set preexisting_video to True; specify sample_video_name if you set preexisting_video to False
-# preexisting_video is a bool, and should only take on True or False
-# inference_video_folder is the name of the folder in the project path "videos_for_inference" folder (no extension)
-# model_name is the name of the trained model, as saved in the project path "final_model_save" folder (do not include the .pt extension, it's added automatically)
-# sample_video_name (if provided) should be the filename (without extension); it should be in the project paths "videos" folder, downloaded using video_downloader or uploaded (ensure .mp4 format if uploaded)
-# NOTE: When passing in inference_video_folder or sample_video_name, it may be necessary to enclose it in quotation marks to avoid terminal marking it as another command
-
 device = train_settings.device
 
-def main():
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog="inference.py",
+        description="Run a trained TrackNet model over a clip's frames and write out a ball-tracking annotated video and a heatmap video.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent("""\
+            examples:
+              # extract frames from videos/inference/<name>.mp4, then run
+              python3 inference.py single_match_model "Federer_00-00-00_to_00-00-02"
 
-    if len(sys.argv) != 4:
-        print("USAGE: python3 inference.py <model_name> <preexisting_video> [inference_video_name OR sample_video_name]")
-        sys.exit(1)
+              # reuse frames already extracted into inference_results/<name>/frames
+              python3 inference.py single_match_model "Federer_00-00-00_to_00-00-02" --existing-frames
+
+            All output is written to inference_results/<name>/ (frames, heatmaps,
+            heatmap_video.mp4, annotated_video.mp4).
+
+            NOTE: clip names usually contain "&" and other characters the shell treats
+            specially, so keep NAME in quotation marks.
+            """),
+    )
+    parser.add_argument(
+        "model",
+        metavar="MODEL",
+        help="Name of the trained model, as saved in the model_saves/final_models folder. Do not include the .pt extension, it's added automatically.",
+    )
+    parser.add_argument(
+        "name",
+        metavar="NAME",
+        help="Name of this inference run. Its results go in inference_results/NAME/. Unless --existing-frames is given, this is ALSO the source clip's filename (without extension), read from videos/inference/NAME.mp4.",
+    )
+    parser.add_argument(
+        "--existing-frames",
+        action="store_true",
+        help="Reuse the frames already in inference_results/NAME/frames instead of extracting them from a source video. Use this to re-run a model over a clip you've already processed.",
+    )
+    return parser
+
+
+def validate_model(parser, paths, model_name):
+    """Resolve model_name"""
+    stem, extension = os.path.splitext(model_name)
+    if extension == "":
+        extension = ".pt"
+    model_path = os.path.join(paths.final_model_save_folder, stem, stem + extension)
+
+    if not os.path.isfile(model_path):
+        available = sorted(
+            entry for entry in os.listdir(paths.final_model_save_folder)
+            if not entry.startswith(".") and os.path.isdir(os.path.join(paths.final_model_save_folder, entry))
+        )
+        parser.error(
+            f"No model named '{model_name}' (looked for {model_path})\n"
+            f"Available models: {', '.join(available) if available else '(none trained yet)'}"
+        )
+
+
+def validate_source_video(parser, paths, name):
+    """Check if clip to extract frames from exists"""
+    video_path = os.path.join(paths.inference_videos_folder, f"{name}.mp4")
+
+    if not os.path.isfile(video_path):
+        available = sorted(
+            os.path.splitext(entry)[0] for entry in os.listdir(paths.inference_videos_folder)
+            if entry.endswith(".mp4")
+        )
+        parser.error(
+            f"No video at {video_path}\n"
+            f"Available inference videos: {', '.join(available) if available else '(none downloaded yet)'}\n"
+            f"Download one using video_downloader.py"
+        )
+
+
+def validate_existing_frames(parser, paths, name):
+    """Check that the frames to reuse are actually there"""
+    frames_folder = os.path.join(paths.inference_results_folder, name, "frames")
+
+    if not os.path.isdir(frames_folder) or not [f for f in os.listdir(frames_folder) if not f.startswith(".")]:
+        available = sorted(
+            entry for entry in os.listdir(paths.inference_results_folder)
+            if not entry.startswith(".") and os.path.isdir(os.path.join(paths.inference_results_folder, entry))
+        )
+        parser.error(
+            f"--existing-frames was given but there are no frames in {frames_folder}\n"
+            f"Existing inference runs: {', '.join(available) if available else '(none yet)'}\n"
+            f"Drop --existing-frames to extract them from videos/inference/{name}.mp4 instead"
+        )
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
 
     paths = ProjectPaths()
-    model_name = sys.argv[1]
-    inference_video_folder = os.path.join(paths.videos_for_inference_folder, sys.argv[3])
+    model_name = args.model
+
+    # Validate before creating anything, so a typo doesn't leave an empty run folder behind
+    validate_model(parser, paths, model_name)
+    if args.existing_frames:
+        validate_existing_frames(parser, paths, args.name)
+    else:
+        validate_source_video(parser, paths, args.name)
+
+    inference_video_folder = os.path.join(paths.inference_results_folder, args.name)
     frames_folder = os.path.join(inference_video_folder, "frames")
+
     if not os.path.exists(inference_video_folder):
             os.mkdir(inference_video_folder)
+
     if not os.path.exists(frames_folder):
         os.mkdir(frames_folder)
 
-    if sys.argv[2].lower() == "false":
-        original_video_filename = f"{sys.argv[3]}.mp4"
-        extract_clip_frames(video_path=os.path.join(paths.videos_folder, original_video_filename), output_dir=frames_folder)
+    if not args.existing_frames:
+        original_video_filename = f"{args.name}.mp4"
+        extract_clip_frames(video_path=os.path.join(paths.inference_videos_folder, original_video_filename), output_dir=frames_folder)
         print("Frames extracted")
-    elif sys.argv[2].lower() == "true":
-        pass
-    else:
-        print("arg <preexisting_video> must be either 'True' or 'False'")
-        sys.exit(1)
-    
+
     tracked_ball_points = obtain_tracked_ball_data(inference_video_folder=inference_video_folder, model_name=model_name)
     create_heatmap_video(inference_video_folder=inference_video_folder)
     create_annotated_video(inference_video_folder=inference_video_folder, tracked_ball_points=tracked_ball_points)

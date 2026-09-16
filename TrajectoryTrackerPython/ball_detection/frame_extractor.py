@@ -5,7 +5,10 @@ import sys
 
 
 def process_all_videos(video_folder_path, output_folder_path):
-    videos = [video for video in os.listdir(video_folder_path) if not video.startswith('.')]
+    videos = [
+        video for video in os.listdir(video_folder_path)
+        if not video.startswith('.') and os.path.isfile(os.path.join(video_folder_path, video))
+    ]
 
     match_groups = {}
     for video in videos:
@@ -67,6 +70,6 @@ def extract_clip_frames(video_path, output_dir):
 
 if __name__ == "__main__":
     paths = ProjectPaths()
-    process_all_videos(paths.videos_folder, paths.raw_frame_folder)
+    process_all_videos(paths.train_videos_folder, paths.raw_frame_folder)
     print("Success!")
 
