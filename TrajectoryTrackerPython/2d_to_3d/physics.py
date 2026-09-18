@@ -175,8 +175,8 @@ class PhysicsSimulation():
         m = self.ball_properties.m
         A = self.ball_properties.A
         I = self.ball_properties.I
-        C_d = self.ball_properties.C_d
-        C_l = self.ball_properties.C_l
+        C_d = self.ball_properties.calculate_C_d(v, w)
+        C_l = self.ball_properties.calculate_C_l(v, w)
         C_m = self.ball_properties.C_m
         g_scalar = self.environment_properties.g
         rho = self.environment_properties.rho

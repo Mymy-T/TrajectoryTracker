@@ -180,7 +180,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         true_diameter = 2 * BallProperties().R
 
-        fx = intrinsics[:, 0, 0].unsqueeze(-1)  # (N, 1)
+        fx = intrinsics[:, 0, 0].unsqueeze(-1)  # All (N, 1)
         fy = intrinsics[:, 1, 1].unsqueeze(-1)
         f = (fx + fy) / 2
 
