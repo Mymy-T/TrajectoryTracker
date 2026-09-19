@@ -67,7 +67,7 @@ class TrajectoryReconstructionDataset(Dataset):
             dataset_type = "test"
 
         self.data_df = pd.read_csv(os.path.join(paths.dataset_csv_folder, f"{dataset_type}_data.csv"))
-        self.data_folder = paths.synthetic_data_folder
+        self.data_folder = paths.processed_data_folder
 
         self.noise_2d = noise_2d
         self.rng = np.random.default_rng(seed) # Used for adding random noise

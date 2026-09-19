@@ -93,4 +93,4 @@ def _split_data_camera_config_borders(df, train_prop, valid_prop, out_path):
 if __name__ == "__main__":
     paths = Paths()
     mode = DataSplitMode.camera_config_border
-    split_data(dataset_folder=paths.synthetic_data_folder, out_path=paths.dataset_csv_folder, mode=mode, train_prop=0.7, valid_prop=0.15)
+    split_data(dataset_folder=paths.processed_data_folder, out_path=paths.dataset_csv_folder, mode=mode, train_prop=0.7, valid_prop=0.15)

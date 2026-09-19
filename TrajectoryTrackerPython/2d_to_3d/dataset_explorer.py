@@ -21,7 +21,7 @@ FADE_TRAIL_SECONDS = 0.5 # how much recent trajectory history "Fade trail" keeps
 
 
 def _dataset_csv_path(paths: Paths):
-    return os.path.join(paths.synthetic_data_folder, "dataset.csv")
+    return os.path.join(paths.processed_data_folder, "dataset.csv")
 
 
 def _camera_position_from_extrinsics(extrinsics: np.ndarray):
@@ -217,7 +217,7 @@ class DatasetExplorerApp(tk.Tk):
         self._cancel_animation()
         self._cancel_pending_slider_redraw()
 
-        data_folder = self.paths.synthetic_data_folder
+        data_folder = self.paths.processed_data_folder
         self._current_trajectory_row = row
         self._current_trajectory_3d = np.load(os.path.join(data_folder, row.trajectory_3d_path))
         trajectory_2d = np.load(os.path.join(data_folder, row.trajectory_2d_path))

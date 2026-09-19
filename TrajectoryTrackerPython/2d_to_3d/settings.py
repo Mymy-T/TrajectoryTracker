@@ -15,6 +15,9 @@ torch_dtype = _torch_numpy_dtype_dict[dtype]
 
 estimate_height_from_diameter = False
 
+simulation_timestep = 0.001
+target_fps = 60.0 # Simulated trajectories interpolated to this fps; 1/target_fps must be >= simulation_timestep
+
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
     num_camera_configs: int = 10
