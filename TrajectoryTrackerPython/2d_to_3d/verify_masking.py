@@ -42,6 +42,13 @@ def _expand_camera(intrinsics, extrinsics, n):
     return intrinsics.unsqueeze(0).expand(n, -1, -1), extrinsics.unsqueeze(0).expand(n, -1, -1)
 
 
+def _diameters(n):
+    """A plausible batch of apparent diameters, near the measured mean of ~8 px. Ignored unless
+    settings.estimate_height_from_diameter is enabled, but passed either way so this suite
+    exercises the same call signature the trainer uses."""
+    return torch.full((n, 2), 8.0, dtype=settings.torch_dtype)
+
+
 def random_trajectory(rng, length):
     xs = rng.uniform(150.0, 800.0, size=length).astype(np.float64)
     ys = rng.uniform(80.0, 450.0, size=length).astype(np.float64)
@@ -71,14 +78,14 @@ def check_batch_matches_standalone(model, intrinsics, extrinsics, lengths_list, 
             x = seq.unsqueeze(0) # (1, L, 2)
             lengths = torch.tensor([seq.shape[0]], dtype=torch.long)
             cam_intrinsics, cam_extrinsics = _expand_camera(intrinsics, extrinsics, 1)
-            coords, eps = model(x, lengths, cam_intrinsics, cam_extrinsics)
+            coords, eps = model(x, lengths, cam_intrinsics, cam_extrinsics, _diameters(1))
             standalone_coords.append(coords[0])
             standalone_eps.append(eps[0])
 
     padded_x, lengths = pad_batch(sequences)
     batch_intrinsics, batch_extrinsics = _expand_camera(intrinsics, extrinsics, len(sequences))
     with torch.no_grad():
-        batch_coords, batch_eps = model(padded_x, lengths, batch_intrinsics, batch_extrinsics)
+        batch_coords, batch_eps = model(padded_x, lengths, batch_intrinsics, batch_extrinsics, _diameters(len(sequences)))
 
     assert_no_nan_inf(f"{label}: batch final_coords", batch_coords)
     assert_no_nan_inf(f"{label}: batch epsilons", batch_eps)
@@ -108,7 +115,7 @@ def check_gradients_finite(model, intrinsics, extrinsics):
     batch_intrinsics, batch_extrinsics = _expand_camera(intrinsics, extrinsics, len(sequences))
 
     model.train()
-    coords, eps = model(padded_x, lengths, batch_intrinsics, batch_extrinsics)
+    coords, eps = model(padded_x, lengths, batch_intrinsics, batch_extrinsics, _diameters(len(sequences)))
     mask = torch.arange(padded_x.shape[1]).unsqueeze(0) < lengths.unsqueeze(1)
     loss = coords[mask].pow(2).sum() + eps[mask].sum()
     loss.backward()

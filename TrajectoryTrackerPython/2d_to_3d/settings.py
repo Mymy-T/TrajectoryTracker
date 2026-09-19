@@ -7,11 +7,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.ba
 
 dtype = np.float32 # Controls the dtype of all loaded arrays and tensors in the pipeline; must be np.float16, np.float32, or np.float64
 
-_TORCH_DTYPE_BY_NUMPY_DTYPE = {np.float16: torch.float16, np.float32: torch.float32, np.float64: torch.float64}
-if dtype not in _TORCH_DTYPE_BY_NUMPY_DTYPE:
+_torch_numpy_dtype_dict = {np.float16: torch.float16, np.float32: torch.float32, np.float64: torch.float64}
+if dtype not in _torch_numpy_dtype_dict:
     raise ValueError("settings.dtype must be one of np.float16, np.float32, or np.float64")
 
-torch_dtype = _TORCH_DTYPE_BY_NUMPY_DTYPE[dtype]
+torch_dtype = _torch_numpy_dtype_dict[dtype]
+
+estimate_height_from_diameter = False
 
 @dataclass(frozen=True)
 class SyntheticDataGeneration:

@@ -1,4 +1,3 @@
-from networkx import diameter
 from data_models import BallProperties
 import numpy as np
 from projector import dehomogenize
@@ -79,13 +78,13 @@ class TrajectoryReconstructionNetwork(nn.Module):
         self.to(dtype=settings.torch_dtype)
 
 
-    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor, diameters: torch.Tensor):
+    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor, diameters: torch.Tensor = None):
         """
         x is (N, L, 2); sequence of image coords
         lengths is (N,)
         intrinsics is (N, 3, 3)
         extrinsics is (N, 4, 4)
-        diameters is (N, 2)
+        diameters is (N, 2); only required when settings.estimate_height_from_diameter is enabled
         """
         lengths = lengths.to(x.device)
         L = x.shape[1]
@@ -103,7 +102,11 @@ class TrajectoryReconstructionNetwork(nn.Module):
         eot_input = delta_p # (N, L, 4)
         epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
 
-        boundary_heights = self.estimate_height_from_diameters(c, d, diameters, intrinsics, lengths) # (N, 2)
+        if settings.estimate_height_from_diameter:
+            boundary_heights = self.estimate_height_from_diameters(c, d, diameters, intrinsics, lengths) # (N, 2)
+        else:
+            boundary_heights = torch.zeros((x.shape[0], 2), dtype=x.dtype, device=x.device) # (N, 2); the height accumulators then start from 0, as in the original formulation
+
         heights = self.height_network(p, delta_p, epsilons, lengths, boundary_heights) # (N, L, 1)
 
         coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords; (N, L, 3)

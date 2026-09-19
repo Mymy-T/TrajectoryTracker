@@ -95,12 +95,15 @@ class TrajectoryReconstructionDataset(Dataset):
         trajectory_3d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_3d_path"])
         trajectory_2d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_2d_path"])
         trajectory_eot_path = os.path.join(self.data_folder, selected_example.loc["trajectory_eot_path"])
-        trajectory_diameter_path = os.path.join(self.data_folder, selected_example.loc["trajectory_diameter_path"])
-        
         trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path)).to(dtype=settings.torch_dtype) # (L, 2)
         trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)).to(dtype=settings.torch_dtype) # (L, 3)
         trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1).to(dtype=settings.torch_dtype) # (L, 1)
-        trajectory_diameters = torch.from_numpy(np.load(trajectory_diameter_path)).to(dtype=settings.torch_dtype) # (2,)
+
+        if settings.estimate_height_from_diameter:
+            trajectory_diameter_path = os.path.join(self.data_folder, selected_example.loc["trajectory_diameter_path"])
+            trajectory_diameters = torch.from_numpy(np.load(trajectory_diameter_path)).to(dtype=settings.torch_dtype) # (2,)
+        else:
+            trajectory_diameters = torch.zeros((2,), dtype=settings.torch_dtype) # Placeholder; keeps the returned tuple's shape the same either way
 
         if self.noise_2d:
             trajectory_noise_2d = torch.from_numpy(self.rng.normal(loc=0.0, scale=self.sigma, size=trajectory_2d.shape)).to(dtype=settings.torch_dtype)
