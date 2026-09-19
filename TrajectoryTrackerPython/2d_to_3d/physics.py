@@ -461,6 +461,59 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, generat
     return simulation.compute_3d_trajectory(mode=mode, num_hits_range=generation_settings.num_hits_range, hit_zone_bounds=generation_settings.hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times, eot
 
 
+# MARK: Timestep Interpolation
+def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, dt_0: float, dt_1: float):
+    if dt_0 > dt_1:
+        raise ValueError("dt_1 must be greater than or equal to dt_0.")
+    
+    # Trajectory
+    T = (len(trajectory) - 1) * dt_0
+    original_times = np.arange(start=0, stop=len(trajectory)) * dt_0 # (N,)
+    new_times = np.arange(start=0, stop=math.floor(T / dt_1) + 1) * dt_1 # Flooring prevents overflowing past last endpoint of original trajectory; (M,)
+
+    N = len(original_times)
+    M = len(new_times)
+
+    new_times_matrix = np.tile(new_times, (N, 1)) # (N, M)
+    original_times_matrix = np.expand_dims(original_times, axis=1) # (N, 1)
+
+    diff_matrix = new_times_matrix - original_times_matrix # (N, M); each col shows the differences for each timestep of the new times with every single one of the old times
+
+    min_diff_indices = np.argmin(abs(diff_matrix), axis=0) # (M,)
+
+    new_trajectory = []
+    for i in range(M):
+        min_diff = diff_matrix[min_diff_indices[i]][i]
+
+        if min_diff > 0:
+            point = _linearly_interpolate(trajectory[min_diff_indices[i]], trajectory[min_diff_indices[i] + 1], min_diff / dt_0)
+        elif min_diff < 0:
+            point = _linearly_interpolate(trajectory[min_diff_indices[i] - 1], trajectory[min_diff_indices[i]], (dt_0 + min_diff) / dt_0) # min_diff < 0
+        else:
+            point = trajectory[min_diff_indices[i]]
+        
+        new_trajectory.append(point)
+    
+    new_trajectory = np.stack(new_trajectory, axis=0, dtype=np.float64)
+
+    # EOT
+    eot_indices = np.nonzero(eot)[0]
+    # eot_timesteps = eot_indices * dt_0
+    # normalized_remainders = np.remainder(eot_timesteps, dt_1) / dt_1
+    # round_up = normalized_remainders >= 0.5
+    # new_eot_indices = np.floor(eot_timesteps / dt_1)
+    # new_eot_indices[round_up] = new_eot_indices[round_up] + 1
+    new_eot_indices = np.floor(eot_indices * dt_0 / dt_1).astype(int)
+    new_eot = np.zeros((M,), dtype=np.float64)
+    new_eot[new_eot_indices] = 1.0
+    
+    return new_trajectory, new_eot
+
+
+def _linearly_interpolate(x_0: np.ndarray, x_1: np.ndarray, t: float):
+    return (1 - t) * x_0 + t * x_1
+
+
 if __name__ == "__main__":
 
     trajectory, _, _ = generate_sample_trajectory()
