@@ -8,6 +8,7 @@ import numpy as np
 import os
 from paths import Paths
 from physics import generate_sample_trajectory
+from settings import SyntheticDataGeneration
 import torch
 from visualizer import overlay_trajectory_on_image, plot_2d_trajectory
 
@@ -38,6 +39,32 @@ def _generate_3d_baseline_coords(coord_set: WorldCoordSet):
     
     return np.stack([far_left, far_right, near_left, near_right], axis=0)
 
+def _generate_full_calibration_3d_coords(coord_set: WorldCoordSet):
+
+    court_properties = CourtProperties()
+
+    corners = _generate_3d_baseline_coords(coord_set) # (4, 3)
+
+    npdfb = court_properties.net_post_distance_from_outer_baseline
+    nph = court_properties.net_height_at_posts
+    nch = court_properties.net_height_at_center
+    sld = court_properties.service_line_dist_from_net
+    w = court_properties.court_width
+
+    # Net points
+    left_net_post = np.array([0, nph, -(w/2 + npdfb)]).astype(np.float32)
+    right_net_post = np.array([0, nph, w/2 + npdfb]).astype(np.float32)
+    center_of_net = np.array([0, nch, 0]).astype(np.float32)
+
+    # Extra points at center of "T"
+    far_t = np.array([sld, 0, 0]).astype(np.float32)
+    near_t = np.array([-sld, 0, 0]).astype(np.float32)
+
+    additional_points = np.stack([left_net_post, center_of_net, right_net_post, far_t, near_t]) # (5, 3)
+
+    return np.concatenate((corners, additional_points), axis=0) # (9, 3)
+
+
 
 def _expand_intrinsics_matrix(intrinsics: np.ndarray):
     """
@@ -61,8 +88,11 @@ def obtain_base_intrinsics(filepath):
 
     return intrinsics
 
+def obtain_base_extrinsics(filepath):
+    return np.load(filepath)
 
-def obtain_extrinsics(coord_set: WorldCoordSet, image_points: np.ndarray, intrinsics: np.ndarray, distortion_coeffs=None, verbose=False):
+
+def obtain_extrinsics_from_pnp(coord_set: WorldCoordSet, image_points: np.ndarray, intrinsics: np.ndarray, save_path, distortion_coeffs=None, verbose=False):
     """
     - intrinsics - a 3 x 3 ndarray
     - image_points - a 4 x 2 ndarray
@@ -82,25 +112,116 @@ def obtain_extrinsics(coord_set: WorldCoordSet, image_points: np.ndarray, intrin
         extrinsics = np.identity(4, dtype=np.float64)
         extrinsics[0:3, 0:3] = r_matrix
         extrinsics[0:3, 3] = t_vec.flatten() # Last col of extrinsic matrix is -Rt = t_vec
-        return extrinsics
 
-    return None
+        np.save(save_path, extrinsics)
+
+    return success
 
 
-def get_base_camera_config():
+def perform_full_camera_calibration(coord_set: WorldCoordSet, image_points: np.ndarray, intrinsics_save_path, extrinsics_save_path, verbose=False):
+    """
+    - image_points - a 9 x 2 ndarray
+    """
+
+    world_points = _generate_full_calibration_3d_coords(coord_set)
+
+    # Initial constraints
+    image_shape = (1920, 1080)
+    cx = image_shape[0] / 2.0
+    cy = image_shape[1] / 2.0
+    f = 1000.0  # Rough guess in pixels; assumed that fx = fy
+
+    intrinsics_guess = np.array([
+        [f, 0, cx],
+        [0, f, cy],
+        [0, 0, 1]
+    ], dtype=np.float64)
+
+    dist_coeffs = np.zeros((5, 1), dtype=np.float64)
+
+    flags = (
+        cv2.CALIB_USE_INTRINSIC_GUESS |
+        cv2.CALIB_FIX_ASPECT_RATIO |
+        cv2.CALIB_FIX_PRINCIPAL_POINT |
+        cv2.CALIB_FIX_K1 | cv2.CALIB_FIX_K2 | cv2.CALIB_FIX_K3 |
+        cv2.CALIB_FIX_K4 | cv2.CALIB_FIX_K5 | cv2.CALIB_FIX_K6 |
+        cv2.CALIB_FIX_TANGENT_DIST
+    )
+
+    rms_error, intrinsics, dist_coefs, r_vecs, t_vecs = cv2.calibrateCamera([world_points], [image_points], image_shape, intrinsics_guess, dist_coeffs, flags=flags) # rvecs and tvecs are lists w/ only one element since only one img was used in calibration; also why world points and image points are passed as lists
+
+    r_vec = r_vecs[0]
+    t_vec = t_vecs[0]
+    r_matrix, _ = cv2.Rodrigues(r_vec) # Convert rotation vector into 3 x 3 rotation matrix
+
+    if verbose:
+        print("Each column of the rotation matrix is a basis vector of the camera coordinate system in terms of world coordinates. The first column is +x (right in camera view), second column is +y (down in camera view), and third column is +z (straight forward in camera view)")
+        print(f"Rotation matrix: \n{r_matrix}")
+        print(f"Camera position (in world coords): \n{-np.matmul(np.transpose(r_matrix), t_vec)}")
+
+    # t_vec is the position of the world origin from camera POV; therefore, t_vec is in camera frame and t_vec = R(P_w - t) = R(0 - t) = -Rt where R is 3 x 3 and t is 3 x 1 (simplified or heterogeneous form)
+    extrinsics = np.identity(4, dtype=np.float64)
+    extrinsics[0:3, 0:3] = r_matrix
+    extrinsics[0:3, 3] = t_vec.flatten() # Last col of extrinsic matrix is -Rt = t_vec
+
+
+    # Save intrinsics and extrinsics
+    intrinsics_data = {
+        "fy": intrinsics[1, 1],
+        "cx": intrinsics[0, 2],
+        "fx": intrinsics[0, 0],
+        "cy": intrinsics[1, 2],
+        "referenceWidth": image_shape[0],
+        "referenceHeight": image_shape[1]
+    }
+    with open(intrinsics_save_path, "w") as file:
+        json.dump(intrinsics_data, file) # Keep format consistent with iPhone intrinsics exports
+
+
+    np.save(extrinsics_save_path, extrinsics)
+
+    return rms_error
+
+
+def get_base_camera_config(): # TODO: Make it conditional on mode (specific param intrinsics_known)
     paths = Paths()
+    data_gen_settings = SyntheticDataGeneration()
+    if data_gen_settings.intrinsics_known: # Load intrinsics (exported from iPhone), then solve PnP problem for extrinsics
+
+        if not os.path.exists(paths.base_intrinsics_path):
+            raise RuntimeError("Known intrinsics must already be formatted as a json in the 'intrinsics' folder.")
+
+        if not os.path.exists(paths.base_extrinsics_path):
+
+            keypoint_path = paths.saved_keypoints_path
+
+            if os.path.exists(keypoint_path):
+                image_points = np.load(keypoint_path)
+            else:
+                obtain_keypoints(verbose=True) # Saves to keypoint_path; TODO: request 4 keypoints only, specify order of click and set of points in pop up window
+                image_points = np.load(keypoint_path)
+            
+            success = obtain_extrinsics_from_pnp(WorldCoordSet.INNER_BASELINE, image_points, base_intrinsics, paths.base_extrinsics_path)
+
+            if not success:
+                raise RuntimeError("Failed to obtain extrinsics from PnP.")
+            
+    else: # Full camera calibration
+        if not (os.path.exists(paths.base_intrinsics_path) and os.path.exists(paths.base_extrinsics_path)):
+            
+            keypoint_path = paths.saved_keypoints_path
+            if os.path.exists(keypoint_path):
+                image_points = np.load(keypoint_path)
+            else:
+                obtain_keypoints(verbose=True) # Saves to keypoint_path; TODO: request 9 keypoints only, specify order of click and set of points in pop up window
+                image_points = np.load(keypoint_path)
+
+            calibration_error = perform_full_camera_calibration(WorldCoordSet.INNER_BASELINE, image_points, paths.base_intrinsics_path, paths.base_extrinsics_path)
+            print(f"Calibration rms error: {calibration_error:.4f}")
+
+
     base_intrinsics = obtain_base_intrinsics(paths.base_intrinsics_path)
-
-    keypoint_path = paths.saved_keypoints_path
-    if os.path.exists(keypoint_path):
-        image_points = np.load(keypoint_path)
-    else:
-        obtain_keypoints(verbose=True) # Saves to keypoint_path
-        image_points = np.load(keypoint_path)
-
-    base_extrinsics = obtain_extrinsics(WorldCoordSet.INNER_BASELINE, image_points, base_intrinsics)
-    if base_extrinsics is None:
-        raise RuntimeError("Failed to obtain base extrinsics.")
+    base_extrinsics = obtain_base_extrinsics(paths.base_extrinsics_path)
 
     return base_intrinsics, base_extrinsics
 

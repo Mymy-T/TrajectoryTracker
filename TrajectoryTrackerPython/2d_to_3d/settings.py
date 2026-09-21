@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from data_models import TrajectoryGenerationSettings, CameraConfigSamplingSettings
+from enum import Enum
 import numpy as np
 import torch
 
@@ -18,12 +19,36 @@ estimate_height_from_diameter = False
 simulation_timestep = 0.001
 target_fps = 60.0 # Simulated trajectories interpolated to this fps; 1/target_fps must be >= simulation_timestep
 
+class CameraPerspectiveMode(Enum):
+    BROADCAST = 1
+    EYE_LEVEL = 2
+
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
     num_camera_configs: int = 10
     trajectories_per_config: int = 50
-    trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(
-        racket_hits=True
-    ))
+
+    trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(racket_hits=True))
     camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings())
+
+    camera_perspective_mode: CameraPerspectiveMode = CameraPerspectiveMode.BROADCAST
+    
+    camera_perspective_name: str = field(init=False)
+    intrinsics_known: bool = field(init=False)
+
+    def __post_init__(self):
+
+        match self.camera_perspective_mode:
+            case CameraPerspectiveMode.BROADCAST:
+                name = "broadcast_view"
+                intrinsics_known = False
+            case CameraPerspectiveMode.EYE_LEVEL:
+                name = "eye_level_view"
+                intrinsics_known = True
+
+        object.__setattr__(self, "camera_perspective_name", name)
+        object.__setattr__(self, "intrinsics_known", intrinsics_known)
+
+    # intrinsics_file_name: str = "iphone_intrinsics.json"
+    # keypoints_file_name: str = "low_keypoints.npy"
 

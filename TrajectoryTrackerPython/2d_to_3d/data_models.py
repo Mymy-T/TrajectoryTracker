@@ -78,6 +78,7 @@ class CourtProperties:
     service_line_dist_from_net: float = 6.40
     net_height_at_center: float = 0.914
     net_height_at_posts: float = 1.07
+    net_post_distance_from_outer_baseline: float = 0.914
 
 
 @dataclass

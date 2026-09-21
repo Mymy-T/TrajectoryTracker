@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
+import os
 from paths import Paths
+from settings import SyntheticDataGeneration
 
 
 def obtain_keypoints(verbose=False):
@@ -16,6 +18,8 @@ def obtain_keypoints(verbose=False):
 
     paths = Paths()
     image_path = paths.sample_image_path
+    if not os.path.exists(image_path):
+        raise RuntimeError(f"Make sure an image exists at {image_path}; this is used as the reference image for selecting keypoints.")
 
     img = cv2.imread(image_path)
     if img is None:
@@ -34,13 +38,22 @@ def obtain_keypoints(verbose=False):
 
     cv2.destroyAllWindows()
 
-    if len(selected_points) == 4:
+    data_gen_settings = SyntheticDataGeneration()
+    if data_gen_settings.intrinsics_known:
+        required_num_points = 4
+    else:
+        required_num_points = 9
+
+    if len(selected_points) == required_num_points:
         points = np.stack(selected_points, axis=0)
         np.save(paths.saved_keypoints_path, points)
     else:
-        print("Error: Must select 4 points")
+        print(f"Error: Must select {required_num_points} points")
         exit()
 
     if verbose:
         print("--- Final Selected Coordinates ---")
         print(selected_points)
+
+
+# TODO: Make it more strict; also list the order required to input points, as determined by the world coord order in projector.py
