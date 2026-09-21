@@ -3,7 +3,7 @@ from model import TrackNet
 from paths import ProjectPaths
 import sys
 from trainer import train_and_evaluate_model, RunType
-import train_settings
+import settings
 
 # TODO: Save model after every single epoch; compare checkpoints at the end; 
 
@@ -11,7 +11,7 @@ if len(sys.argv) not in (3, 4):
     print(f"USAGE: python3 train_script.py <model_name> <resuming> [max_train_seconds]")
     sys.exit(1)
 paths = ProjectPaths()
-device = train_settings.device
+device = settings.device
 model = TrackNet()
 pretrained_state = torch.load(paths.pretrained_model_path, weights_only=True, map_location=torch.device(device))
 model.load_state_dict(pretrained_state)

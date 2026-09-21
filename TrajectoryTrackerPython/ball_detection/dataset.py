@@ -34,7 +34,7 @@ class TrackNetDataset(Dataset):
         #  self.data_df has columns [match_clip_id, heatmap(t), img(t), ...,  img(t-(frame_sequence_len - 1))]
         selected_paths = self.data_df.iloc[idx, 1:].apply(lambda x: os.path.join(self.processed_data_folder, x)).tolist()
         heatmap_path = selected_paths[0]
-        img_paths = list(reversed(selected_paths[1:])) # [img(t-(frame_sequence_len-1)), ... , img(t-2), img(t-1), img(t)] -> order correct, where lower channel numbers are earlier timesteps
+        img_paths = selected_paths[1:] # [img(t), img(t-1), ..., img(t-(frame_sequence_len-1))]; newest first, so channels 0-2 are the current frame (pretrained model convention)
         inputs = self._get_input(img_paths)
         outputs = self._get_output(heatmap_path)
         return (inputs, outputs)
@@ -48,7 +48,7 @@ class TrackNetDataset(Dataset):
             img = cv2.imread(img_path) # Keep in BGR format, the pretrained model was trained this way
             imgs.append(img) # Each img of shape (h, w, c)
         
-        imgs = np.concatenate(imgs, axis=2) # Concatenate along channel dimension; lower channel dimensions correspond to earlier frames
+        imgs = np.concatenate(imgs, axis=2) # Concatenate along channel dimension; channels 0-2 are the current frame, higher channels are earlier frames
         imgs = np.moveaxis(imgs, 2, 0) # Shape now (c, h, w)
         imgs = imgs.astype(np.float32) / 255.0 # Normalize pixel values to [0, 1] to enhance training stability
         return imgs

@@ -20,7 +20,7 @@ class ProjectPaths:
         # Model Paths
         self.final_model_save_folder = os.path.join(base_folder, "model_saves", "final_models")
         self.hyperparam_tuning_model_save_folder = os.path.join(base_folder, "model_saves", "hparam_tune_models")
-        self.pretrained_model_path = os.path.join(self.final_model_save_folder, "pretrained_model.pt")
+        self.pretrained_model_path = os.path.join(self.final_model_save_folder, "pretrained_model", "pretrained_model.pt")
 
         # Testing
         self.inference_results_folder = os.path.join(base_folder, "inference_results") # Output workspace for inference runs; contains frames, heatmaps, and annotated videos per run

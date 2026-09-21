@@ -5,9 +5,9 @@ from torch.utils.data import DataLoader, Subset
 from dataset import DatasetType, TrackNetDataset
 from model import TrackNet
 import trainer
-import train_settings
+import settings
 
-device = train_settings.device
+device = settings.device
 
 
 def _make_subset(dataset_type, subset_size, seed):

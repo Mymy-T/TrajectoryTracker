@@ -6,9 +6,9 @@ from paths import ProjectPaths
 import sys
 from torch.utils.data import DataLoader
 import trainer
-import train_settings
+import settings
 
-device = train_settings.device
+device = settings.device
 
 
 if len(sys.argv) != 2:

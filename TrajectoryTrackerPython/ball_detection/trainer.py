@@ -10,11 +10,11 @@ from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import torch.nn.functional as F
-import train_settings
+import settings
 
 # TODO: Log hyperparam tuning results to a csv file for easy access, probably within paths.hyperparam_tuning_training_logs
 
-device = train_settings.device
+device = settings.device
 
 class RunType(Enum):
     final_model_training = 0

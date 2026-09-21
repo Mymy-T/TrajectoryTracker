@@ -1,8 +1,8 @@
 import os
 import torch
-import train_settings
+import settings
 
-device = train_settings.device
+device = settings.device
 
 def _compare_model_performance(checkpoint_model: tuple, new_model: tuple, precision_diff_threshold=0.01, min_recall=0.8): # TODO: Get baseline min_recall by comparing it to pretrained model performance, if it's not too low
     """

@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-import train_settings
+import settings
 
 # Credit to yastrebksv's implementation of TrackNet on github: https://github.com/yastrebksv/TrackNet/blob/main/model.py
 
@@ -133,7 +133,7 @@ class TrackNet(nn.Module):
 
     
 if __name__ == '__main__':
-    device =train_settings.device
+    device =settings.device
     print(f"Testing on device: {device.type}")
     model = TrackNet().to(device)
     input = torch.rand(1, 9, 360, 640).to(device)

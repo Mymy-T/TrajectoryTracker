@@ -8,11 +8,45 @@ from paths import ProjectPaths
 import textwrap
 import torch
 from tqdm import trange
-import train_settings
+import settings
 
 # TODO: Create an mp4 video of the heatmaps too (before threshold is applied)
 
-device = train_settings.device
+device = settings.device
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    paths = ProjectPaths()
+    model_name = args.model
+
+    # Validate before creating anything, so a typo doesn't leave an empty run folder behind
+    validate_model(parser, paths, model_name)
+    if args.existing_frames:
+        validate_existing_frames(parser, paths, args.name)
+    else:
+        validate_source_video(parser, paths, args.name)
+
+    inference_video_folder = os.path.join(paths.inference_results_folder, args.name)
+    frames_folder = os.path.join(inference_video_folder, "frames")
+
+    if not os.path.exists(inference_video_folder):
+            os.mkdir(inference_video_folder)
+
+    if not os.path.exists(frames_folder):
+        os.mkdir(frames_folder)
+
+    if not args.existing_frames:
+        original_video_filename = f"{args.name}.mp4"
+        extract_clip_frames(video_path=os.path.join(paths.inference_videos_folder, original_video_filename), output_dir=frames_folder)
+        print("Frames extracted")
+
+    tracked_ball_points = obtain_tracked_ball_data(inference_video_folder=inference_video_folder, model_name=model_name)
+    create_heatmap_video(inference_video_folder=inference_video_folder)
+    create_annotated_video(inference_video_folder=inference_video_folder, tracked_ball_points=tracked_ball_points)
+
 
 def build_parser():
     parser = argparse.ArgumentParser(
@@ -102,38 +136,6 @@ def validate_existing_frames(parser, paths, name):
         )
 
 
-def main():
-    parser = build_parser()
-    args = parser.parse_args()
-
-    paths = ProjectPaths()
-    model_name = args.model
-
-    # Validate before creating anything, so a typo doesn't leave an empty run folder behind
-    validate_model(parser, paths, model_name)
-    if args.existing_frames:
-        validate_existing_frames(parser, paths, args.name)
-    else:
-        validate_source_video(parser, paths, args.name)
-
-    inference_video_folder = os.path.join(paths.inference_results_folder, args.name)
-    frames_folder = os.path.join(inference_video_folder, "frames")
-
-    if not os.path.exists(inference_video_folder):
-            os.mkdir(inference_video_folder)
-
-    if not os.path.exists(frames_folder):
-        os.mkdir(frames_folder)
-
-    if not args.existing_frames:
-        original_video_filename = f"{args.name}.mp4"
-        extract_clip_frames(video_path=os.path.join(paths.inference_videos_folder, original_video_filename), output_dir=frames_folder)
-        print("Frames extracted")
-
-    tracked_ball_points = obtain_tracked_ball_data(inference_video_folder=inference_video_folder, model_name=model_name)
-    create_heatmap_video(inference_video_folder=inference_video_folder)
-    create_annotated_video(inference_video_folder=inference_video_folder, tracked_ball_points=tracked_ball_points)
-
 def load_model(model_name):
     paths = ProjectPaths()
     model_name, extension = os.path.splitext(model_name)
@@ -148,11 +150,13 @@ def load_model(model_name):
     model.to(device)
     return model
 
+
 def create_frame_sequence(i, seq_len=3):
     if i < seq_len - 1:
         return None
-    frame_ids = list(range(i - seq_len + 1, i + 1))
+    frame_ids = list(range(i, i - seq_len, -1)) # [i, i-1, ..., i-(seq_len-1)]; newest first, matching the pretrained model
     return frame_ids
+
 
 def get_input(img_paths):
         imgs = []
@@ -161,7 +165,7 @@ def get_input(img_paths):
             img = cv2.resize(img, (640, 360)) # Originally 1920, 1080
             imgs.append(img) # Each img of shape (h, w, c)
         
-        imgs = np.concatenate(imgs, axis=2) # Concatenate along channel dimension; lower channel dimensions correspond to earlier frames
+        imgs = np.concatenate(imgs, axis=2) # Concatenate along channel dimension; channels 0-2 are the current frame, higher channels are earlier frames (pretrained model convention)
         imgs = np.moveaxis(imgs, 2, 0) # Shape now (c, h, w)
         imgs = imgs.astype(np.float32) / 255.0 # Normalize pixel values to [0, 1] as done in training
         return imgs
@@ -204,12 +208,12 @@ def obtain_tracked_ball_data(inference_video_folder, model_name):
                 ball_points[i] = ball_point
     return ball_points
 
+
 def create_heatmap_video(inference_video_folder):
     # Video saved to the same folder as the frames (not heatmaps)
-    paths = ProjectPaths()
     output_path = os.path.join(inference_video_folder, "heatmap_video.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Standard MP4 codec
-    output_fps = 60.0
+    output_fps = settings.inference_fps
     frame_size = (1920, 1080)
     video_writer = cv2.VideoWriter(output_path, fourcc, output_fps, frame_size)
 
@@ -224,12 +228,13 @@ def create_heatmap_video(inference_video_folder):
     video_writer.release()
     print("Heatmap video saved successfully!")
 
+
 def create_annotated_video(inference_video_folder, tracked_ball_points):
     # Video saved to the same folder as the frames
     paths = ProjectPaths()
     output_path = os.path.join(inference_video_folder, "annotated_video.mp4")
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # Standard MP4 codec
-    output_fps = 60.0
+    output_fps = settings.inference_fps
     frame_size = (1920, 1080)
     video_writer = cv2.VideoWriter(output_path, fourcc, output_fps, frame_size)
 
@@ -250,6 +255,7 @@ def create_annotated_video(inference_video_folder, tracked_ball_points):
 
     video_writer.release()
     print("Annotated video saved successfully!")
+
 
 if __name__ == "__main__":
     main()
