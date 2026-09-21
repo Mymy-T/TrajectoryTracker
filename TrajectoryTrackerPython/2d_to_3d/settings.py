@@ -23,6 +23,14 @@ class CameraPerspectiveMode(Enum):
     BROADCAST = 1
     EYE_LEVEL = 2
 
+class WorldCoordSet(Enum):
+    SERVICE_LINE = 1
+    INNER_BASELINE = 2 
+
+class NetPostType(Enum):
+    SINGLES = 1
+    DOUBLES = 2
+
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
     num_camera_configs: int = 10
@@ -32,9 +40,13 @@ class SyntheticDataGeneration:
     camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings())
 
     camera_perspective_mode: CameraPerspectiveMode = CameraPerspectiveMode.BROADCAST
-    
     camera_perspective_name: str = field(init=False)
     intrinsics_known: bool = field(init=False)
+
+
+    expected_image_size = (1920, 1080) # (width, height); theoretically enforced by ball_detection's video_downloader.py
+    corner_keypoint_set: WorldCoordSet = WorldCoordSet.INNER_BASELINE
+    net_post_type: NetPostType = NetPostType.SINGLES # Change based on sample img
 
     def __post_init__(self):
 
@@ -48,7 +60,4 @@ class SyntheticDataGeneration:
 
         object.__setattr__(self, "camera_perspective_name", name)
         object.__setattr__(self, "intrinsics_known", intrinsics_known)
-
-    # intrinsics_file_name: str = "iphone_intrinsics.json"
-    # keypoints_file_name: str = "low_keypoints.npy"
 

@@ -8,16 +8,12 @@ import numpy as np
 import os
 from paths import Paths
 from physics import generate_sample_trajectory
-from settings import SyntheticDataGeneration
+import settings
 import torch
 from visualizer import overlay_trajectory_on_image, plot_2d_trajectory
 
-class WorldCoordSet(Enum):
-    SERVICE_LINE = 1
-    INNER_BASELINE = 2 
 
-
-def _generate_3d_baseline_coords(coord_set: WorldCoordSet):
+def _generate_3d_baseline_coords(coord_set: settings.WorldCoordSet):
     """
     Returns a ndarray of size 4 x 3; each row is a 3D coord; the rows are ordered as far_left, far_right, near_left, near_right, in that precise order
     """
@@ -26,12 +22,12 @@ def _generate_3d_baseline_coords(coord_set: WorldCoordSet):
     l = court_properties.court_length
     sw = court_properties.singles_width
     sld = court_properties.service_line_dist_from_net
-    if coord_set == WorldCoordSet.SERVICE_LINE:
+    if coord_set == settings.WorldCoordSet.SERVICE_LINE:
         far_left = np.array([sld, 0, -sw/2]).astype(np.float32)
         far_right = np.array([sld, 0, sw/2]).astype(np.float32)
         near_left = np.array([-sld, 0, -sw/2]).astype(np.float32)
         near_right = np.array([-sld, 0, sw/2]).astype(np.float32)
-    elif coord_set == WorldCoordSet.INNER_BASELINE:
+    elif coord_set == settings.WorldCoordSet.INNER_BASELINE:
         far_left = np.array([l/2, 0, -sw/2]).astype(np.float32)
         far_right = np.array([l/2, 0, sw/2]).astype(np.float32)
         near_left = np.array([-l/2, 0, -sw/2]).astype(np.float32)
@@ -39,21 +35,26 @@ def _generate_3d_baseline_coords(coord_set: WorldCoordSet):
     
     return np.stack([far_left, far_right, near_left, near_right], axis=0)
 
-def _generate_full_calibration_3d_coords(coord_set: WorldCoordSet):
+def _generate_full_calibration_3d_coords(coord_set: settings.WorldCoordSet):
 
     court_properties = CourtProperties()
 
     corners = _generate_3d_baseline_coords(coord_set) # (4, 3)
 
-    npdfb = court_properties.net_post_distance_from_outer_baseline
+    npdfs = court_properties.net_post_distance_from_sideline
     nph = court_properties.net_height_at_posts
     nch = court_properties.net_height_at_center
     sld = court_properties.service_line_dist_from_net
     w = court_properties.court_width
+    sw = court_properties.singles_width
 
     # Net points
-    left_net_post = np.array([0, nph, -(w/2 + npdfb)]).astype(np.float32)
-    right_net_post = np.array([0, nph, w/2 + npdfb]).astype(np.float32)
+    if settings.SyntheticDataGeneration().net_post_type == settings.NetPostType.DOUBLES:
+        left_net_post = np.array([0, nph, -(w/2 + npdfs)]).astype(np.float32)
+        right_net_post = np.array([0, nph, w/2 + npdfs]).astype(np.float32)
+    else:
+        left_net_post = np.array([0, nph, -(sw/2 + npdfs)]).astype(np.float32)
+        right_net_post = np.array([0, nph, sw/2 + npdfs]).astype(np.float32)
     center_of_net = np.array([0, nch, 0]).astype(np.float32)
 
     # Extra points at center of "T"
@@ -92,7 +93,7 @@ def obtain_base_extrinsics(filepath):
     return np.load(filepath)
 
 
-def obtain_extrinsics_from_pnp(coord_set: WorldCoordSet, image_points: np.ndarray, intrinsics: np.ndarray, save_path, distortion_coeffs=None, verbose=False):
+def obtain_extrinsics_from_pnp(coord_set: settings.WorldCoordSet, image_points: np.ndarray, intrinsics: np.ndarray, save_path, distortion_coeffs=None, verbose=False):
     """
     - intrinsics - a 3 x 3 ndarray
     - image_points - a 4 x 2 ndarray
@@ -118,7 +119,7 @@ def obtain_extrinsics_from_pnp(coord_set: WorldCoordSet, image_points: np.ndarra
     return success
 
 
-def perform_full_camera_calibration(coord_set: WorldCoordSet, image_points: np.ndarray, intrinsics_save_path, extrinsics_save_path, verbose=False):
+def perform_full_camera_calibration(coord_set: settings.WorldCoordSet, image_points: np.ndarray, intrinsics_save_path, extrinsics_save_path, verbose=False):
     """
     - image_points - a 9 x 2 ndarray
     """
@@ -126,7 +127,7 @@ def perform_full_camera_calibration(coord_set: WorldCoordSet, image_points: np.n
     world_points = _generate_full_calibration_3d_coords(coord_set)
 
     # Initial constraints
-    image_shape = (1920, 1080)
+    image_shape = settings.SyntheticDataGeneration().expected_image_size
     cx = image_shape[0] / 2.0
     cy = image_shape[1] / 2.0
     f = 1000.0  # Rough guess in pixels; assumed that fx = fy
@@ -182,45 +183,42 @@ def perform_full_camera_calibration(coord_set: WorldCoordSet, image_points: np.n
 
     return rms_error
 
-
-def get_base_camera_config(): # TODO: Make it conditional on mode (specific param intrinsics_known)
+# MARK: Base Camera Config
+def get_base_camera_config():
     paths = Paths()
-    data_gen_settings = SyntheticDataGeneration()
+    data_gen_settings = settings.SyntheticDataGeneration()
+    
+    # Obtain new keypoints even if intrinsics/extrinsics exist, since the old keypoints can't be found
+    keypoint_path = paths.saved_keypoints_path
+    if os.path.exists(keypoint_path):
+        image_points = np.load(keypoint_path)
+        keypoints_found = True
+    else:
+        obtain_keypoints(verbose=True) # Saves to keypoint_path
+        image_points = np.load(keypoint_path)
+        keypoints_found = False # Re-calibrate params even if they already exist since they no longer reflect the new keypoints
+
     if data_gen_settings.intrinsics_known: # Load intrinsics (exported from iPhone), then solve PnP problem for extrinsics
 
         if not os.path.exists(paths.base_intrinsics_path):
             raise RuntimeError("Known intrinsics must already be formatted as a json in the 'intrinsics' folder.")
+        
+        base_intrinsics = obtain_base_intrinsics(paths.base_intrinsics_path)
 
-        if not os.path.exists(paths.base_extrinsics_path):
-
-            keypoint_path = paths.saved_keypoints_path
-
-            if os.path.exists(keypoint_path):
-                image_points = np.load(keypoint_path)
-            else:
-                obtain_keypoints(verbose=True) # Saves to keypoint_path; TODO: request 4 keypoints only, specify order of click and set of points in pop up window
-                image_points = np.load(keypoint_path)
+        if not os.path.exists(paths.base_extrinsics_path) or not keypoints_found:
             
-            success = obtain_extrinsics_from_pnp(WorldCoordSet.INNER_BASELINE, image_points, base_intrinsics, paths.base_extrinsics_path)
+            success = obtain_extrinsics_from_pnp(data_gen_settings.corner_keypoint_set, image_points, base_intrinsics, paths.base_extrinsics_path)
 
             if not success:
                 raise RuntimeError("Failed to obtain extrinsics from PnP.")
             
     else: # Full camera calibration
-        if not (os.path.exists(paths.base_intrinsics_path) and os.path.exists(paths.base_extrinsics_path)):
-            
-            keypoint_path = paths.saved_keypoints_path
-            if os.path.exists(keypoint_path):
-                image_points = np.load(keypoint_path)
-            else:
-                obtain_keypoints(verbose=True) # Saves to keypoint_path; TODO: request 9 keypoints only, specify order of click and set of points in pop up window
-                image_points = np.load(keypoint_path)
-
-            calibration_error = perform_full_camera_calibration(WorldCoordSet.INNER_BASELINE, image_points, paths.base_intrinsics_path, paths.base_extrinsics_path)
+        if not (os.path.exists(paths.base_intrinsics_path) and os.path.exists(paths.base_extrinsics_path)) or not keypoints_found:
+            calibration_error = perform_full_camera_calibration(data_gen_settings.corner_keypoint_set, image_points, paths.base_intrinsics_path, paths.base_extrinsics_path)
             print(f"Calibration rms error: {calibration_error:.4f}")
+        
+        base_intrinsics = obtain_base_intrinsics(paths.base_intrinsics_path)
 
-
-    base_intrinsics = obtain_base_intrinsics(paths.base_intrinsics_path)
     base_extrinsics = obtain_base_extrinsics(paths.base_extrinsics_path)
 
     return base_intrinsics, base_extrinsics
@@ -369,11 +367,17 @@ if __name__ == "__main__":
     print(extrinsics if extrinsics is not None else "Failure to obtain extrinsics")
 
     if extrinsics is not None:
+        r_matrix = extrinsics[0:3, 0:3] # (3, 3)
+        t_vec = extrinsics[0:3, 3:] # (3, 1)
+        T = np.squeeze(np.matmul(-r_matrix.T, t_vec), axis=-1) # t_vec = -RT -> T = -R^T t_vec since R is orthogonal; T is (3,)
+        print(f"Camera position in world coords: {T}")
+
+    if extrinsics is not None:
         trajectory, _, _ = generate_sample_trajectory()
         projection_matrix = create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
         projected_trajectory = project_trajectory_to_2d(trajectory, projection_matrix)
 
-        overlay_trajectory_on_image(image_path="./sample_img.png", projected_trajectory=projected_trajectory, output_path="./sample_img_overlay.png")
+        # overlay_trajectory_on_image(image_path="./sample_img.png", projected_trajectory=projected_trajectory, output_path="./sample_img_overlay.png")
 
         plot_2d_trajectory(projected_trajectory)
 
