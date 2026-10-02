@@ -1,9 +1,9 @@
 from data_models import BallProperties
 import numpy as np
-from projector import dehomogenize, obtain_base_extrinsics
+from projector import dehomogenize
 import settings
 import torch
-import torch.functional as F
+import torch.nn.functional as F
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
@@ -38,9 +38,9 @@ def _reverse_valid_prefix(x, lengths):
     positions = torch.arange(L, device=x.device).unsqueeze(0).expand(N, L)  # (N, L)
     lengths = lengths.to(x.device).unsqueeze(1)  # (N, 1)
 
-    reversed_positions = lengths - 1 - positions # These are indices of which element should be moved to the corresponding position
+    reversed_positions = lengths - 1 - positions # These are indices of which element should be moved to the corresponding position; (N, L)
 
-    is_valid = positions < lengths
+    is_valid = positions < lengths # (N, L)
     indices = torch.where(is_valid, reversed_positions, positions).unsqueeze(-1)  # (N, L, 1); padding stays at end
     indices = indices.expand(-1, -1, D) # (N, L, D)
 
@@ -104,7 +104,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         bounce_input = delta_p # (N, L, 4)
         bounce_tokens = self.bounce_network(bounce_input, lengths) # (N, L, 1)
-        bounce_positions = self.obtain_bounce_positions(bounce_tokens, lengths) # (N, L)
+        bounce_positions = self.obtain_bounce_positions(bounce_tokens, lengths) # (N, L, 1)
 
         eot_input = delta_p # (N, L, 4)
         epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
@@ -114,7 +114,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         else:
             boundary_heights = torch.zeros((x.shape[0], 2), dtype=x.dtype, device=x.device) # (N, 2); the height accumulators then start from 0, as in the original formulation
 
-        heights = self.height_network(p, delta_p, epsilons, lengths, boundary_heights) # (N, L, 1)
+        heights = self.height_network(p, delta_p, epsilons, lengths, boundary_heights, bounce_positions) # (N, L, 1)
 
         coords = self.obtain_coords_from_height(c, d, heights) # Find intersection of ray with height to get 3d coords; (N, L, 3)
 
@@ -218,7 +218,10 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
     def obtain_bounce_positions(self, bounce_tokens: torch.Tensor, lengths: torch.Tensor):
         """
-        bounce_tokens is (N, L, 1)
+        Essentially non-maximum suppression
+
+        - bounce_tokens is (N, L, 1)
+        - Returns bounce_positions, which is (N, L, 1)
         """
         N = bounce_tokens.shape[0]
         L = bounce_tokens.shape[1]
@@ -226,9 +229,9 @@ class TrajectoryReconstructionNetwork(nn.Module):
         min_threshold = self.model_settings.bounce_token_min_prob
         bounce_tokens = bounce_tokens.squeeze(-1) # (N, L)
         local_maxes  = F.max_pool1d(bounce_tokens.unsqueeze(1), kernel_size=2*nms_radius+1, stride=1, padding=nms_radius).squeeze(1) # max_pool1d requires channel dim; (N, L)
-        bounce_mask = ((bounce_tokens >= local_maxes) & (bounce_tokens > min_threshold)) # (N, L)
+        bounce_positions = ((bounce_tokens >= local_maxes) & (bounce_tokens > min_threshold)) # (N, L)
         padding_mask = _build_validity_mask(lengths, L)
-        bounce_mask = _mask(bounce_mask, padding_mask)
+        bounce_positions = _mask(bounce_positions.unsqueeze(-1), padding_mask).float() # (N, L, 1)
         
         # indices = torch.nonzero(bounce_mask)
         # max_bounces_in_batch = bounce_mask.sum(dim=1).max().item()
@@ -240,7 +243,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
         #  return bounce_positions # (N, B) where B is the max number of detected bounces in a batch
 
-        return bounce_mask # (N, L)
+        return bounce_positions # (N, L, 1)
 
 
 
@@ -261,7 +264,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
 
 
 # MARK: Bounce Network
-class BounceNetwork(nn.Module):
+class BounceNetwork(nn.Module): # Trained separately, since it's output isn't fed directly through model (it's just for segmentation of each physical trajectory from the larger rally)
 
     def __init__(self):
         super().__init__()
@@ -364,7 +367,7 @@ class HeightDeltaLSTM(nn.Module):
         """
         - x_reduced is (N, L, 5) and contains both delta_p and epsilon
         - boundary_heights is (N,)
-        - bounce_positions is (N, L)
+        - bounce_positions is (N, L, 1)
         """
         N, L, _ = x_reduced.shape
 
@@ -375,6 +378,8 @@ class HeightDeltaLSTM(nn.Module):
         state_0 = None
         state_1 = None
         state_2 = None
+
+        start_positions = bounce_positions.argmax(dim=1) # Index of first bounce; (N, 1)
 
         for t in range(L):
             x_t = torch.concatenate((x_reduced[:, t, :], h), dim=-1) # (N, 6)
@@ -387,8 +392,8 @@ class HeightDeltaLSTM(nn.Module):
             delta_h_t = self.fc_network(x_t) # (N, 1, 1)
             delta_h_t = delta_h_t.squeeze(1) # (N, 1)
 
-            heights.append(h) # Assumes the initial height is 0
-            h = h + delta_h_t
+            heights.append(h) # Assumes the initial height is boundary_heights
+            h = torch.where(start_positions <= t, h + delta_h_t, h) # Only start accumulating the heights once the first (or last if b_lstm) bounce is passed
 
         heights_tensor = torch.stack(heights, dim=1) # (N, L, 1)
 
@@ -449,7 +454,7 @@ class HeightNetwork(nn.Module):
         - epsilon is (N, L, 1)
         - lengths is (N,)
         - boundary_heights is (N, 2)
-        - bounce_positions is (N, L)
+        - bounce_positions is (N, L, 1)
 
         Returns
         - h_refined, which is (N, L, 1) and a first estimate of the height
@@ -460,16 +465,39 @@ class HeightNetwork(nn.Module):
         lstm_b_initial_heights = boundary_heights[:, 1]
 
         lstm_f_input = (torch.concatenate((delta_p, epsilon), dim=-1), lstm_f_initial_heights, bounce_positions) # torch concatenate part is (N, L, 5); boundary heights is always 0 if estimate height from diameter is False
-        lstm_b_input = (_reverse_valid_prefix(lstm_f_input[0], lengths), lstm_b_initial_heights, bounce_positions)
+        lstm_b_input = (_reverse_valid_prefix(lstm_f_input[0], lengths), lstm_b_initial_heights, _reverse_valid_prefix(bounce_positions, lengths))
 
         h_f = self.lstm_f(*lstm_f_input) # (N, L, 1)
         h_b = self.lstm_b(*lstm_b_input) # (N, L, 1); accumulated in reversed order
         h_b = _reverse_valid_prefix(h_b, lengths) # Reverse it again back to proper order
 
+        # Blend h_f and h_b when possible to get best estimate for h
+        start_positions = bounce_positions.argmax(dim=1) # Is 0 if no bounces (since it always returns the index of the first largest number); (N, 1)
+        end_positions = L - 1 - torch.flip(bounce_positions, dims=[1]).argmax(dim=1) # Is L - 1 if no bounces (since the argmax always returns the index of the first largest number, which is 0 in the case of no bounces); (N, 1)
+
         positions = torch.arange(L, device=p.device, dtype=p.dtype).unsqueeze(0) # (1, L); zero-indexed
-        denom = (lengths - 1).clamp(min=1).to(device=p.device, dtype=p.dtype).unsqueeze(1) # (N, 1); floored to avoid division by 0 for length 1 sequences
-        fb_weights = (positions / denom).unsqueeze(-1) # (N, L, 1); reaches 1.0 at each sequence end, ignoring padding
-        h = (1 - fb_weights) * h_f + fb_weights * h_b # (N, L, 1)
+        positions = positions.expand(N, L) # All (N, L)
+        starts = start_positions.expand(N, L)
+        ends = end_positions.expand(N, L)
+        lens = lengths.unsqueeze(-1).expand(N, L)
+
+        w = torch.zeros((N, L), device=p.device, dtype=p.dtype) # Weight for h_b; weight for h_f is 1 - w
+        w = torch.where(positions < starts, 1.0, w)
+        denom = (ends - starts).clamp(min=1) # In the case of one bounce
+        w = torch.where((starts <= positions) & (positions <= ends), (positions - starts) / denom, w)
+        w = torch.where((ends < positions) & (positions < lens), 0.0, w)
+        w = w.unsqueeze(-1) # (N, L, 1)
+
+        h = (1 - w) * h_f + w * h_b # (N, L, 1)
+
+        # h_0 = h_b[torch.arange(N), :start_positions]
+        # h_2 = h_f[torch.arange(N), end_positions:]
+
+
+        # positions = torch.arange(L, device=p.device, dtype=p.dtype).unsqueeze(0) # (1, L); zero-indexed
+        # denom = (lengths - 1).clamp(min=1).to(device=p.device, dtype=p.dtype).unsqueeze(1) # (N, 1); floored to avoid division by 0 for length 1 sequences
+        # fb_weights = (positions / denom).unsqueeze(-1) # (N, L, 1); reaches 1.0 at each sequence end, ignoring padding
+        # h = (1 - fb_weights) * h_f + fb_weights * h_b # (N, L, 1)
 
         lstm_height_input = torch.concatenate((p, h), dim=-1)
         h_refined = self.lstm_height(lstm_height_input, lengths) # (N, L, 1)
@@ -477,13 +505,13 @@ class HeightNetwork(nn.Module):
         return h_refined  # (N, L, 1)
     
 
-    def obtain_last_bounce_pos(self, bounce_positions):
-        """
-        bounce_positions_row is (N, B)
-        """
-        first_invalid_indices = (bounce_positions == -1).argmax(dim=1)
+    # def obtain_last_bounce_pos(self, bounce_positions):
+    #     """
+    #     bounce_positions_row is (N, B)
+    #     """
+    #     first_invalid_indices = (bounce_positions == -1).argmax(dim=1)
 
-        return first_invalid_indices - 1 # (N,)
+    #     return first_invalid_indices - 1 # (N,)
 
 
 

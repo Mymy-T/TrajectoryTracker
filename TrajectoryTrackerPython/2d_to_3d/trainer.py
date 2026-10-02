@@ -154,10 +154,11 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         inputs = batch[0].to(device) # (N, L, 2)
         coord_labels = batch[1].to(device) # (N, L, 3)
         eot_labels = batch[2].to(device) # (N, L, 1)
-        lengths = batch[3].to(device) # (N,)
-        intrinsics = batch[4].to(device) # (N, 3, 3)
-        extrinsics = batch[5].to(device) # (N, 4, 4)
-        diameters = batch[6].to(device) # (N, 2)
+        bounce_token_labels = batch[3].to(device) # (N, L, 1)
+        lengths = batch[4].to(device) # (N,)
+        intrinsics = batch[5].to(device) # (N, 3, 3)
+        extrinsics = batch[6].to(device) # (N, 4, 4)
+        diameters = batch[7].to(device) # (N, 2)
 
 
         pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters)

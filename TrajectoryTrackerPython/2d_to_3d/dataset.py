@@ -30,6 +30,7 @@ def collate_func(batch):
 
     lengths = torch.tensor([len(seq) for seq in inputs], dtype=torch.long) # Corresponding outputs have same sequence lengths; shape of lengths is (N,)
     
+    # All (N, L, D) below; value of D depends on what's given in dataset's __getitem__
     padded_inputs = pad_sequence(inputs, batch_first=True, padding_value=0.0)
     padded_outputs = pad_sequence(outputs, batch_first=True, padding_value=0.0)
     padded_eot_labels = pad_sequence(eot_labels, batch_first=True, padding_value=0.0)
