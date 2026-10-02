@@ -81,7 +81,7 @@ class TrajectoryReconstructionNetwork(nn.Module):
         self.to(dtype=settings.torch_dtype)
 
 
-    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor, diameters: torch.Tensor = None):
+    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor, diameters: torch.Tensor = None, bounce_token_labels: torch.Tensor = None):
         """
         x is (N, L, 2); sequence of image coords
         lengths is (N,)
@@ -102,8 +102,12 @@ class TrajectoryReconstructionNetwork(nn.Module):
         difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
         delta_p = _mask(delta_p, difference_mask)
 
-        bounce_input = delta_p # (N, L, 4)
-        bounce_tokens = self.bounce_network(bounce_input, lengths) # (N, L, 1)
+        if bounce_token_labels is None:
+            bounce_input = delta_p # (N, L, 4)
+            bounce_tokens = self.bounce_network(bounce_input, lengths) # (N, L, 1)
+        else: # Teacher forcing; used during training, as the bounce detection network is trained separately
+            bounce_tokens = bounce_token_labels # (N, L, 1)
+
         bounce_positions = self.obtain_bounce_positions(bounce_tokens, lengths) # (N, L, 1)
 
         eot_input = delta_p # (N, L, 4)
@@ -232,16 +236,6 @@ class TrajectoryReconstructionNetwork(nn.Module):
         bounce_positions = ((bounce_tokens >= local_maxes) & (bounce_tokens > min_threshold)) # (N, L)
         padding_mask = _build_validity_mask(lengths, L)
         bounce_positions = _mask(bounce_positions.unsqueeze(-1), padding_mask).float() # (N, L, 1)
-        
-        # indices = torch.nonzero(bounce_mask)
-        # max_bounces_in_batch = bounce_mask.sum(dim=1).max().item()
-        # bounce_positions = torch.full((N, max_bounces_in_batch),  fill_value=-1, dtype=torch.int, device=bounce_mask.device)
-
-        # for i in range(N):
-        #     row_specific_col_indices = indices[indices[:, 0] == i, 1]
-        #     bounce_positions[i, :len(row_specific_col_indices)] = row_specific_col_indices
-
-        #  return bounce_positions # (N, B) where B is the max number of detected bounces in a batch
 
         return bounce_positions # (N, L, 1)
 
@@ -490,29 +484,10 @@ class HeightNetwork(nn.Module):
 
         h = (1 - w) * h_f + w * h_b # (N, L, 1)
 
-        # h_0 = h_b[torch.arange(N), :start_positions]
-        # h_2 = h_f[torch.arange(N), end_positions:]
-
-
-        # positions = torch.arange(L, device=p.device, dtype=p.dtype).unsqueeze(0) # (1, L); zero-indexed
-        # denom = (lengths - 1).clamp(min=1).to(device=p.device, dtype=p.dtype).unsqueeze(1) # (N, 1); floored to avoid division by 0 for length 1 sequences
-        # fb_weights = (positions / denom).unsqueeze(-1) # (N, L, 1); reaches 1.0 at each sequence end, ignoring padding
-        # h = (1 - fb_weights) * h_f + fb_weights * h_b # (N, L, 1)
-
         lstm_height_input = torch.concatenate((p, h), dim=-1)
         h_refined = self.lstm_height(lstm_height_input, lengths) # (N, L, 1)
 
         return h_refined  # (N, L, 1)
-    
-
-    # def obtain_last_bounce_pos(self, bounce_positions):
-    #     """
-    #     bounce_positions_row is (N, B)
-    #     """
-    #     first_invalid_indices = (bounce_positions == -1).argmax(dim=1)
-
-    #     return first_invalid_indices - 1 # (N,)
-
 
 
 # MARK: Refinement Network

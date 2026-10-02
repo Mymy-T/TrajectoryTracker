@@ -161,7 +161,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         diameters = batch[7].to(device) # (N, 2)
 
 
-        pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters)
+        pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters=diameters, bounce_token_labels=bounce_token_labels)
 
         loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
         loss.backward() # Accumulates gradients if zero grad isn't called
