@@ -1,8 +1,9 @@
 from data_models import BallProperties
 import numpy as np
-from projector import dehomogenize
+from projector import dehomogenize, obtain_base_extrinsics
 import settings
 import torch
+import torch.functional as F
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
@@ -37,7 +38,7 @@ def _reverse_valid_prefix(x, lengths):
     positions = torch.arange(L, device=x.device).unsqueeze(0).expand(N, L)  # (N, L)
     lengths = lengths.to(x.device).unsqueeze(1)  # (N, 1)
 
-    reversed_positions = lengths - positions - 1 # These are indices of which element should be moved to the corresponding position
+    reversed_positions = lengths - 1 - positions # These are indices of which element should be moved to the corresponding position
 
     is_valid = positions < lengths
     indices = torch.where(is_valid, reversed_positions, positions).unsqueeze(-1)  # (N, L, 1); padding stays at end
@@ -68,9 +69,11 @@ def _run_lstm_with_packing(lstm, x, lengths):
 # MARK: Full Network
 class TrajectoryReconstructionNetwork(nn.Module):
 
-    def __init__(self): # intrinsics is 3 x 3; extrinsincs is 4 x 4 # TODO: Updated all calls to instantiation
+    def __init__(self):
         super().__init__()
 
+        self.model_settings = settings.Model()
+        self.bounce_network = BounceNetwork()
         self.eot_network = EOTNetwork()
         self.height_network = HeightNetwork()
         self.refinement_network = RefinementNetwork()
@@ -98,6 +101,10 @@ class TrajectoryReconstructionNetwork(nn.Module):
         delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; (N, L, 4)
         difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
         delta_p = _mask(delta_p, difference_mask)
+
+        bounce_input = delta_p # (N, L, 4)
+        bounce_tokens = self.bounce_network(bounce_input, lengths) # (N, L, 1)
+        bounce_positions = self.obtain_bounce_positions(bounce_tokens, lengths) # (N, L)
 
         eot_input = delta_p # (N, L, 4)
         epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
@@ -207,6 +214,34 @@ class TrajectoryReconstructionNetwork(nn.Module):
         h = torch.stack((h_first, h_last), dim=-1) # (N, 2)
 
         return h # (N, 2)
+    
+
+    def obtain_bounce_positions(self, bounce_tokens: torch.Tensor, lengths: torch.Tensor):
+        """
+        bounce_tokens is (N, L, 1)
+        """
+        N = bounce_tokens.shape[0]
+        L = bounce_tokens.shape[1]
+        nms_radius = self.model_settings.bounce_token_nms_radius
+        min_threshold = self.model_settings.bounce_token_min_prob
+        bounce_tokens = bounce_tokens.squeeze(-1) # (N, L)
+        local_maxes  = F.max_pool1d(bounce_tokens.unsqueeze(1), kernel_size=2*nms_radius+1, stride=1, padding=nms_radius).squeeze(1) # max_pool1d requires channel dim; (N, L)
+        bounce_mask = ((bounce_tokens >= local_maxes) & (bounce_tokens > min_threshold)) # (N, L)
+        padding_mask = _build_validity_mask(lengths, L)
+        bounce_mask = _mask(bounce_mask, padding_mask)
+        
+        # indices = torch.nonzero(bounce_mask)
+        # max_bounces_in_batch = bounce_mask.sum(dim=1).max().item()
+        # bounce_positions = torch.full((N, max_bounces_in_batch),  fill_value=-1, dtype=torch.int, device=bounce_mask.device)
+
+        # for i in range(N):
+        #     row_specific_col_indices = indices[indices[:, 0] == i, 1]
+        #     bounce_positions[i, :len(row_specific_col_indices)] = row_specific_col_indices
+
+        #  return bounce_positions # (N, B) where B is the max number of detected bounces in a batch
+
+        return bounce_mask # (N, L)
+
 
 
     def obtain_coords_from_height(self, c: torch.Tensor, d: torch.Tensor, h: torch.Tensor):
@@ -223,6 +258,44 @@ class TrajectoryReconstructionNetwork(nn.Module):
         z = c_z + (h - c_y) * _safe_divide(d_z, d_y) # (N, L)
 
         return torch.stack((x, h, z), dim=-1) # (N, L, 3)
+
+
+# MARK: Bounce Network
+class BounceNetwork(nn.Module):
+
+    def __init__(self):
+        super().__init__()
+
+        self.lstm_0 = nn.LSTM(input_size=4, hidden_size=64, bidirectional=True, batch_first=True)
+        self.lstm_1 = nn.LSTM(input_size=128, hidden_size=64, bidirectional=True, batch_first=True)
+        self.lstm_2 = nn.LSTM(input_size=128, hidden_size=64, bidirectional=True, batch_first=True)
+
+        fc_0 = nn.Linear(in_features=128, out_features=32)
+        fc_1 = nn.Linear(in_features=32, out_features=32)
+        fc_2 = nn.Linear(in_features=32, out_features=32)
+        fc_3 = nn.Linear(in_features=32, out_features=1)
+
+        self.fc_network = nn.Sequential(
+            fc_0,
+            nn.LeakyReLU(negative_slope=0.01),
+            fc_1,
+            nn.LeakyReLU(negative_slope=0.01),
+            fc_2,
+            nn.LeakyReLU(negative_slope=0.01),
+            fc_3,
+            nn.Sigmoid()
+        )
+
+    def forward(self, x, lengths): # x is (N, L, 4); lengths is (N,)
+        lstm_out_0 = _run_lstm_with_packing(self.lstm_0, x, lengths) # (N, L, 128)
+        lstm_out_1 = _run_lstm_with_packing(self.lstm_1, lstm_out_0, lengths) # (N, L, 128)
+        lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
+
+        bounce_tokens = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
+        bounce_tokens = _mask(bounce_tokens, _build_validity_mask(lengths, x.shape[1]))
+
+        return bounce_tokens  # (N, L, 1)
+
 
 
 # MARK: EOT Network
@@ -287,10 +360,11 @@ class HeightDeltaLSTM(nn.Module):
             fc_3
         )
 
-    def forward(self, x_reduced, boundary_heights):
+    def forward(self, x_reduced, boundary_heights, bounce_positions):
         """
         - x_reduced is (N, L, 5) and contains both delta_p and epsilon
         - boundary_heights is (N,)
+        - bounce_positions is (N, L)
         """
         N, L, _ = x_reduced.shape
 
@@ -363,17 +437,19 @@ class HeightNetwork(nn.Module):
     def __init__(self):
         super().__init__()
 
+        self.estimate_height_from_diameter = settings.estimate_height_from_diameter
         self.lstm_f = HeightDeltaLSTM()
         self.lstm_b = HeightDeltaLSTM()
         self.lstm_height = HeightLSTM()
 
-    def forward(self, p, delta_p, epsilon, lengths, boundary_heights):
+    def forward(self, p, delta_p, epsilon, lengths, boundary_heights, bounce_positions):
         """
         Inputs
         - p, delta_p are (N, L, 4)
         - epsilon is (N, L, 1)
         - lengths is (N,)
         - boundary_heights is (N, 2)
+        - bounce_positions is (N, L)
 
         Returns
         - h_refined, which is (N, L, 1) and a first estimate of the height
@@ -383,8 +459,8 @@ class HeightNetwork(nn.Module):
         lstm_f_initial_heights = boundary_heights[:, 0] # Both (N,)
         lstm_b_initial_heights = boundary_heights[:, 1]
 
-        lstm_f_input = (torch.concatenate((delta_p, epsilon), dim=-1), lstm_f_initial_heights) # torch concatenate part is (N, L, 5)
-        lstm_b_input = (_reverse_valid_prefix(lstm_f_input[0], lengths), lstm_b_initial_heights)
+        lstm_f_input = (torch.concatenate((delta_p, epsilon), dim=-1), lstm_f_initial_heights, bounce_positions) # torch concatenate part is (N, L, 5); boundary heights is always 0 if estimate height from diameter is False
+        lstm_b_input = (_reverse_valid_prefix(lstm_f_input[0], lengths), lstm_b_initial_heights, bounce_positions)
 
         h_f = self.lstm_f(*lstm_f_input) # (N, L, 1)
         h_b = self.lstm_b(*lstm_b_input) # (N, L, 1); accumulated in reversed order
@@ -399,6 +475,16 @@ class HeightNetwork(nn.Module):
         h_refined = self.lstm_height(lstm_height_input, lengths) # (N, L, 1)
 
         return h_refined  # (N, L, 1)
+    
+
+    def obtain_last_bounce_pos(self, bounce_positions):
+        """
+        bounce_positions_row is (N, B)
+        """
+        first_invalid_indices = (bounce_positions == -1).argmax(dim=1)
+
+        return first_invalid_indices - 1 # (N,)
+
 
 
 # MARK: Refinement Network

@@ -61,3 +61,9 @@ class SyntheticDataGeneration:
         object.__setattr__(self, "camera_perspective_name", name)
         object.__setattr__(self, "intrinsics_known", intrinsics_known)
 
+
+
+@dataclass(frozen=True)
+class Model:
+    bounce_token_nms_radius: int = 3
+    bounce_token_min_prob: int = 0.9

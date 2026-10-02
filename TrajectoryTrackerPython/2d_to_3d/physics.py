@@ -64,7 +64,10 @@ class PhysicsSimulation():
             if out_of_bounds:
                 break
 
-        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
+        bounce_tokens = [0.0] * (len(trajectory) - 1)
+        bounce_tokens.append(1.0)
+
+        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
     def _compute_trajectory_bounce_only(self, max_bounces, oob_buffer):
@@ -73,12 +76,16 @@ class PhysicsSimulation():
         """
         trajectory = []
         times = []
+        bounce_tokens = []
         n_bounces = 0
         i = 0
         while True:
 
             trajectory.append(self.ball_state.position.copy())
             times.append(i * self.timestep)
+
+            if len(bounce_tokens) == i: # Prevent double counting if a bounce adds a 1.0 token
+                bounce_tokens.append(0.0)
 
             i += 1
             self._rk4_step()
@@ -90,12 +97,13 @@ class PhysicsSimulation():
                 self.ball_state.velocity = vf
                 self.ball_state.spin = wf
                 n_bounces += 1
+                bounce_tokens.append(1.0)
 
             out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
             if n_bounces == max_bounces or out_of_bounds:
                 break
 
-        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
+        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
     def _compute_trajectory_bounce_and_hit(self, num_hits_range, hit_zone_bounds, bounce_trigger_cap, oob_buffer):
@@ -115,12 +123,16 @@ class PhysicsSimulation():
         trajectory = []
         times = []
         eot = []
+        bounce_tokens = []
         i = 0
         while True:
 
             trajectory.append(self.ball_state.position.copy())
             times.append(i * self.timestep)
             eot.append(0.0)
+
+            if len(bounce_tokens) == i: # Prevent double counting if a bounce adds a 1.0 token
+                bounce_tokens.append(0.0)
 
             i += 1
             self._rk4_step()
@@ -130,6 +142,7 @@ class PhysicsSimulation():
             landed = (y <= 0)
             if landed:
                 self.ball_state.position = np.array([x, 0, z])
+                bounce_tokens.append(1.0)
 
             if num_hits < target_hits:
 
@@ -168,7 +181,7 @@ class PhysicsSimulation():
             if out_of_bounds:
                 break
 
-        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.array(eot, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
+        return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.array(eot, dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
     def _compute_accelerations(self, v, w):
@@ -414,6 +427,7 @@ def _resolve_trajectory_mode(bounces, racket_hits):
 
 
 # MARK: Example Trajectory
+# TODO: Restrict num_hits range to a single number, maybe 2 or 3 hits for now
 def generate_sample_trajectory(timestep=0.001, bounces=True, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, rng: np.random.Generator = None):
     court_properties = CourtProperties()
     l = court_properties.court_length
@@ -462,7 +476,7 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, generat
 
 
 # MARK: Timestep Interpolation
-def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, dt_0: float, dt_1: float):
+def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, bounce_tokens: np.ndarray, dt_0: float, dt_1: float):
     if dt_0 > dt_1:
         raise ValueError("dt_1 must be greater than or equal to dt_0.")
     
@@ -496,7 +510,7 @@ def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, dt_0: f
     
     new_trajectory = np.stack(new_trajectory, axis=0, dtype=np.float64)
 
-    # EOT
+    # EOT - floored to be timestep before event
     eot_indices = np.nonzero(eot)[0]
     # eot_timesteps = eot_indices * dt_0
     # normalized_remainders = np.remainder(eot_timesteps, dt_1) / dt_1
@@ -506,8 +520,14 @@ def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, dt_0: f
     new_eot_indices = np.floor(eot_indices * dt_0 / dt_1).astype(int)
     new_eot = np.zeros((M,), dtype=np.float64)
     new_eot[new_eot_indices] = 1.0
-    
-    return new_trajectory, new_eot
+
+    # Bounce Tokens - rounded to nearest timestep
+    bounce_token_indicies = np.nonzero(bounce_tokens)[0]
+    new_bounce_token_indicies = np.round(bounce_token_indicies * dt_0 / dt_1).astype(int).clip(0, M - 1)
+    new_bounce_tokens = np.zeros((M,), dtype=np.float64)
+    new_bounce_tokens[new_bounce_token_indicies] = 1.0
+
+    return new_trajectory, new_eot, new_bounce_tokens
 
 
 def _linearly_interpolate(x_0: np.ndarray, x_1: np.ndarray, t: float):

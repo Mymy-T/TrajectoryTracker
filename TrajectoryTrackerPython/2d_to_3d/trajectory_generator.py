@@ -31,30 +31,35 @@ def generate_raw_trajectories(data_gen_settings=SyntheticDataGeneration(), seed=
 
     trajectories_3d_folder = os.path.join(raw_data_folder, "trajectories_3d")
     trajectories_eot_folder = os.path.join(raw_data_folder, "trajectories_eot")
+    trajectories_bounce_tokens_folder = os.path.join(raw_data_folder, "trajectories_bounce_tokens")
 
     os.makedirs(trajectories_3d_folder, exist_ok=True)
     os.makedirs(trajectories_eot_folder, exist_ok=True)
+    os.makedirs(trajectories_bounce_tokens_folder, exist_ok=True)
 
     num_trajectories = data_gen_settings.num_camera_configs * data_gen_settings.trajectories_per_config
 
     rows = []
     for trajectory_id in tqdm(range(num_trajectories), desc="Trajectories"):
 
-        trajectory, times, eot = generate_random_trajectory(rng, timestep=timestep, generation_settings=data_gen_settings.trajectory_generation_settings)
+        trajectory, times, eot, bounce_tokens = generate_random_trajectory(rng, timestep=timestep, generation_settings=data_gen_settings.trajectory_generation_settings)
 
         trajectory_name = f"trajectory_{trajectory_id:05d}"
 
         trajectory_3d_path = os.path.join(trajectories_3d_folder, f"{trajectory_name}.npy")
         trajectory_eot_path = os.path.join(trajectories_eot_folder, f"{trajectory_name}.npy")
+        trajectory_bounce_tokens_path = os.path.join(trajectories_bounce_tokens_folder, f"{trajectory_name}.npy")
 
         np.save(trajectory_3d_path, trajectory)
         np.save(trajectory_eot_path, eot)
+        np.save(trajectory_bounce_tokens_path, bounce_tokens)
 
         rows.append({
             "trajectory_id": trajectory_id,
             "simulation_timestep": timestep,
             "trajectory_3d_path": remove_path_before(full_path=trajectory_3d_path, first_part_to_keep="trajectories_3d"),
-            "trajectory_eot_path": remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot")
+            "trajectory_eot_path": remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot"),
+            "trajectory_bounce_tokens_path": remove_path_before(full_path=trajectory_bounce_tokens_path, first_part_to_keep="trajectories_bounce_tokens")
         })
 
     df = pd.DataFrame(rows)

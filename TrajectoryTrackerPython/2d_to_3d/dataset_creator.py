@@ -1,3 +1,4 @@
+from multiprocessing import process
 import numpy as np
 import os
 import pandas as pd
@@ -36,11 +37,13 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
     trajectories_3d_folder = os.path.join(processed_data_folder, "trajectories_3d")
     trajectories_2d_folder = os.path.join(processed_data_folder, "trajectories_2d")
     trajectories_eot_folder = os.path.join(processed_data_folder, "trajectories_eot")
+    trajectories_bounce_tokens_folder = os.path.join(processed_data_folder, "trajectories_bounce_tokens")
     trajectories_diameter_folder = os.path.join(processed_data_folder, "trajectories_diameter")
 
     os.makedirs(trajectories_3d_folder, exist_ok=True)
     os.makedirs(trajectories_2d_folder, exist_ok=True)
     os.makedirs(trajectories_eot_folder, exist_ok=True)
+    os.makedirs(trajectories_bounce_tokens_folder, exist_ok=True)
     os.makedirs(trajectories_diameter_folder, exist_ok=True)
 
     new_timestep = 1 / target_fps
@@ -57,8 +60,9 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
 
             raw_trajectory = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_3d_path"]))
             raw_eot = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_eot_path"]))
+            raw_bounce_tokens = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_bounce_tokens_path"]))
 
-            trajectory, eot = interpolate_to_new_timestep(raw_trajectory, raw_eot, settings.simulation_timestep, new_timestep)
+            trajectory, eot, bounce_tokens = interpolate_to_new_timestep(raw_trajectory, raw_eot, raw_bounce_tokens, settings.simulation_timestep, new_timestep)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
             diameters = proj.obtain_projected_diameters(trajectory, intrinsics, extrinsics)
 
@@ -67,11 +71,13 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
             trajectory_3d_path = os.path.join(trajectories_3d_folder, f"{example_id}.npy")
             trajectory_2d_path = os.path.join(trajectories_2d_folder, f"{example_id}.npy")
             trajectory_eot_path = os.path.join(trajectories_eot_folder, f"{example_id}.npy")
+            trajectory_bounce_tokens_path = os.path.join(trajectories_bounce_tokens_folder, f"{example_id}.npy")
             trajectory_diameter_path = os.path.join(trajectories_diameter_folder, f"{example_id}.npy")
 
             np.save(trajectory_3d_path, trajectory)
             np.save(trajectory_2d_path, projected_trajectory)
             np.save(trajectory_eot_path, eot)
+            np.save(trajectory_bounce_tokens_path, bounce_tokens)
             np.save(trajectory_diameter_path, diameters)
 
             rows.append({
@@ -86,6 +92,7 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
                 "trajectory_3d_path": remove_path_before(full_path=trajectory_3d_path, first_part_to_keep="trajectories_3d"),
                 "trajectory_2d_path": remove_path_before(full_path=trajectory_2d_path, first_part_to_keep="trajectories_2d"),
                 "trajectory_eot_path": remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot"),
+                "trajectory_bounce_tokens_path": remove_path_before(full_path=trajectory_bounce_tokens_path, first_part_to_keep="trajectories_bounce_tokens"),
                 "trajectory_diameter_path": remove_path_before(full_path=trajectory_diameter_path, first_part_to_keep="trajectories_diameter"),
                 "num_points": len(trajectory),
                 "timestep": new_timestep,

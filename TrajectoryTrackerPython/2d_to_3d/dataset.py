@@ -16,11 +16,11 @@ class DatasetType(Enum):
 
 
 def collate_func(batch):
-    sequences = [batch[i][0] for i in range(len(batch))] # [(i1, o1, el1), (i2, o2, el2), ...]
+    sequences = [batch[i][0] for i in range(len(batch))] # [(i1, o1, eot1, bt1), (i2, o2, el2, bt2), ...]
     cam_configs = [batch[i][1] for i in range(len(batch))] # [(intrinsics_1, extrinsics_1), (intrinsics_2, extrinsics_2), ...]
     diameters = [batch[i][2] for i in range(len(batch))] # [diameters_1, diameters_2, ...]
 
-    inputs, outputs, eot_labels = zip(*sequences) # [(i1, o1, el1), (i2, o2, el2), ...] -> [(i1, i2, ...), (o1, o2, ...), (el1, el2, ...)]
+    inputs, outputs, eot_labels, bounce_token_labels = zip(*sequences) # [(i1, o1, eot1, bt1), (i2, o2, eot2, bt2), ...] -> [(i1, i2, ...), (o1, o2, ...), (eot1, eot2, ...), (bt1, bt2, ...)]
     intrinsics, extrinsics = zip(*cam_configs) # [(intrinsics_1, extrinsics_1), (intrinsics_2, extrinsics_2), ...] -> [(intrinsics_1, intrinsics_2, ...), (extrinsics_1, extrinsics_2, ...)]
     
     intrinsics = torch.stack(intrinsics) # (N, 3, 3)
@@ -33,8 +33,9 @@ def collate_func(batch):
     padded_inputs = pad_sequence(inputs, batch_first=True, padding_value=0.0)
     padded_outputs = pad_sequence(outputs, batch_first=True, padding_value=0.0)
     padded_eot_labels = pad_sequence(eot_labels, batch_first=True, padding_value=0.0)
+    padded_bounce_token_labels = pad_sequence(bounce_token_labels, batch_first=True, padding_value=0.0)
     
-    return padded_inputs, padded_outputs, padded_eot_labels, lengths, intrinsics, extrinsics, diameters
+    return padded_inputs, padded_outputs, padded_eot_labels, padded_bounce_token_labels, lengths, intrinsics, extrinsics, diameters
 
 
 def obtain_intrinsics(fx, fy, cx, cy):
@@ -95,9 +96,11 @@ class TrajectoryReconstructionDataset(Dataset):
         trajectory_3d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_3d_path"])
         trajectory_2d_path = os.path.join(self.data_folder, selected_example.loc["trajectory_2d_path"])
         trajectory_eot_path = os.path.join(self.data_folder, selected_example.loc["trajectory_eot_path"])
+        trajectory_bounce_tokens_path = os.path.join(self.data_folder, selected_example.loc["trajectory_bounce_tokens_path"])
         trajectory_2d = torch.from_numpy(np.load(trajectory_2d_path)).to(dtype=settings.torch_dtype) # (L, 2)
         trajectory_3d = torch.from_numpy(np.load(trajectory_3d_path)).to(dtype=settings.torch_dtype) # (L, 3)
         trajectory_eot = torch.from_numpy(np.load(trajectory_eot_path)).unsqueeze(-1).to(dtype=settings.torch_dtype) # (L, 1)
+        trajectory_bounce_tokens = torch.from_numpy(np.load(trajectory_bounce_tokens_path)).unsqueeze(-1).to(dtype=settings.torch_dtype) # (L, 1)
 
         if settings.estimate_height_from_diameter:
             trajectory_diameter_path = os.path.join(self.data_folder, selected_example.loc["trajectory_diameter_path"])
@@ -110,7 +113,7 @@ class TrajectoryReconstructionDataset(Dataset):
             trajectory_2d += trajectory_noise_2d
 
 
-        return (trajectory_2d, trajectory_3d, trajectory_eot), (intrinsics, extrinsics), trajectory_diameters
+        return (trajectory_2d, trajectory_3d, trajectory_eot, trajectory_bounce_tokens), (intrinsics, extrinsics), trajectory_diameters
     
 if __name__ == "__main__":
     data = TrajectoryReconstructionDataset(DatasetType.valid, noise_2d=False) # Data has shape (N, x, y) where y = 3 if x = 1 and y = 2 if x = 2
@@ -126,7 +129,8 @@ if __name__ == "__main__":
     print(f"Example batch 2d coords shape: {batch[0].shape}")
     print(f"Example batch 3d coords shape: {batch[1].shape}")
     print(f"EOT array of above batch: {batch[2].shape}")
-    print(f"Lengths array: {batch[3]}")
-    print(f"Intrinsics: {batch[4].shape}")
-    print(f"Extrinsics: {batch[5].shape}")
-    print(f"Initial Heights: {batch[6].shape}")
+    print(f"Bounce tokens array of above batch: {batch[3].shape}")
+    print(f"Lengths array: {batch[4]}")
+    print(f"Intrinsics: {batch[5].shape}")
+    print(f"Extrinsics: {batch[6].shape}")
+    print(f"Initial Heights: {batch[7].shape}")
