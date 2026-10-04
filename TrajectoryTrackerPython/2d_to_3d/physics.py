@@ -1,5 +1,5 @@
 import copy
-from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, TrajectoryGenerationSettings
+from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, TrajectoryGenerationSettings, ShotType
 from enum import Enum
 import math
 import numpy as np
@@ -317,6 +317,7 @@ class PhysicsSimulation():
         hit_pos = self.ball_state.position
         hit_v = self.ball_state.velocity
 
+        # Find the sign for v_x
         if hit_pos[0] != 0:
             target_sign = -math.copysign(1.0, hit_pos[0])
         elif hit_v[0] != 0:
@@ -324,22 +325,46 @@ class PhysicsSimulation():
         else:
             target_sign = 1.0
 
-        v_low = np.array([10.0, 3.0, -8.0]) # TODO: Use same bounds as used in generate random trajectory
-        v_high = np.array([30.0, 10.0, 8.0])
+        # v_low = np.array([10.0, 3.0, -8.0]) # TODO: Use same bounds as used in generate random trajectory
+        # v_high = np.array([30.0, 10.0, 8.0])
 
-        w_low = np.array([-400.0, -400.0, -400.0])
-        w_high = np.array([400.0, 400.0, 400.0])
+        # w_low = np.array([-400.0, -400.0, -400.0])
+        # w_high = np.array([400.0, 400.0, 400.0])
+
+        if (hit_pos[2] >= 0) and (hit_pos[0] <= 0):
+            shot_type = ShotType.FH
+        elif (hit_pos[2] > 0) and (hit_pos[0] > 0):
+            shot_type = ShotType.BH
+        elif (hit_pos[2] < 0) and (hit_pos[0] <= 0):
+            shot_type = ShotType.BH
+        elif (hit_pos[2] <= 0) and (hit_pos[0] > 0):
+            shot_type = ShotType.FH
+        
+        match shot_type:
+            case ShotType.FH:
+                shot_gen_settings = TrajectoryGenerationSettings().fh_dist
+            case ShotType.BH:
+                shot_gen_settings = TrajectoryGenerationSettings().bh_dist
+
+        v_mu = shot_gen_settings.v_mu
+        v_stdev = shot_gen_settings.v_stdev
+        v_bias = shot_gen_settings.v_z_positional_bias
+        spin_mu = shot_gen_settings.w_mu
+        spin_stdev = shot_gen_settings.w_stdev
 
         for _ in range(max_attempts):
 
-            v_candidate = self.rng.uniform(v_low, v_high)
+            # v_candidate = self.rng.uniform(v_low, v_high)
+            v_candidate = _sample_velocity(self.rng, v_mu, v_stdev, v_bias, hit_pos)
             v_candidate[0] = target_sign * v_candidate[0]
 
-            w_candidate = self.rng.uniform(w_low, w_high)
+            # w_candidate = self.rng.uniform(w_low, w_high)
+            w_candidate = _sample_spin(self.rng, spin_mu, spin_stdev)
 
             landing = self._predict_landing(hit_pos, v_candidate, w_candidate)
             if landing is None:
                 continue
+
             x_land, z_land = landing
 
             in_bounds = (abs(x_land) <= l / 2 and abs(z_land) <= w_court / 2)
@@ -350,7 +375,7 @@ class PhysicsSimulation():
 
         # Simplified deterministic fallback; aim well inside the court on the target side so land pos is highly likely to be in bounds when spin & drag are taken into account
         x_target = target_sign * (l / 4)
-        z_target = 0.0
+        z_target = 1.0
         flight_time = 1.0 # Arbitrarily choosen
         g = self.environment_properties.g
 
@@ -426,6 +451,22 @@ def _resolve_trajectory_mode(bounces, racket_hits):
     return TrajectoryMode.BOUNCE_AND_HIT if racket_hits else TrajectoryMode.BOUNCE_ONLY
 
 
+def _sample_velocity(rng: np.random.Generator, v_mu, v_stdev, v_bias, x):
+    w = CourtProperties().court_width
+    # Adjust v_z_mu based on z position
+    x_z = x[2]
+    v_z_mu = v_mu[2]
+    normalized_scale_factor = -x_z / (w/2)
+    v_z_mu_adjusted = v_z_mu + normalized_scale_factor * v_bias
+    v_mu[2] = v_z_mu_adjusted
+
+    return rng.normal(loc=v_mu, scale=v_stdev).astype(float) # (3,)
+
+
+def _sample_spin(rng: np.random.Generator, spin_mu, spin_stdev):
+    return rng.normal(loc=spin_mu, scale=spin_stdev).astype(float) # (3,)
+
+
 # MARK: Example Trajectory
 # TODO: Restrict num_hits range to a single number, maybe 2 or 3 hits for now
 def generate_sample_trajectory(timestep=0.001, bounces=True, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, rng: np.random.Generator = None):
@@ -450,23 +491,43 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, generat
     - Defaults are centered around the same values used by generate_sample_trajectory
     - The same rng drives both the initial state sampling here and the in-rally racket hit sampling inside PhysicsSimulation (if racket_hits=True)
     """
-    court_properties = CourtProperties()
-    l = court_properties.court_length
-    w = court_properties.court_width
-    
-    position_bounds = generation_settings.position_bounds
-    velocity_bounds = generation_settings.velocity_bounds
-    spin_bounds = generation_settings.spin_bounds
-    if position_bounds is None:
-        position_bounds = ([-l/2, 0.5, -w/2], [-l/2, 1.5, w/2])
-    if velocity_bounds is None:
-        velocity_bounds = ([10, 3, -8], [30, 10, 8])
-    if spin_bounds is None:
-        spin_bounds = ([-400, -400, -400], [400, 400, 400])
+    # court_properties = CourtProperties()
+    # l = court_properties.court_length
+    # w = court_properties.court_width
 
-    x_i = rng.uniform(position_bounds[0], position_bounds[1]).astype(float)
-    v_i = rng.uniform(velocity_bounds[0], velocity_bounds[1]).astype(float)
-    spin_i = rng.uniform(spin_bounds[0], spin_bounds[1]).astype(float)
+    shot_type = rng.choice(list(ShotType))
+
+    match shot_type:
+        case ShotType.FH:
+            shot_gen_settings = generation_settings.fh_dist
+        case ShotType.BH:
+            shot_gen_settings = generation_settings.bh_dist
+    
+    position_bounds = (shot_gen_settings.x_lower_bound, shot_gen_settings.x_upper_bound)
+    v_mu = shot_gen_settings.v_mu
+    v_stdev = shot_gen_settings.v_stdev
+    v_bias = shot_gen_settings.v_z_positional_bias
+    spin_mu = shot_gen_settings.w_mu
+    spin_stdev = shot_gen_settings.w_stdev
+    
+    x_i = rng.uniform(position_bounds[0], position_bounds[1]).astype(float) 
+    v_i = _sample_velocity(rng, v_mu, v_stdev, v_bias, x_i)
+    spin_i = _sample_spin(rng, spin_mu, spin_stdev)
+
+    
+    # position_bounds = generation_settings.position_bounds
+    # velocity_bounds = generation_settings.velocity_bounds
+    # spin_bounds = generation_settings.spin_bounds
+    # if position_bounds is None:
+    #     position_bounds = ([-l/2, 0.5, -w/2], [-l/2, 1.5, w/2])
+    # if velocity_bounds is None:
+    #     velocity_bounds = ([10, 3, -8], [30, 10, 8])
+    # if spin_bounds is None:
+    #     spin_bounds = ([-400, -400, -400], [400, 400, 400])
+
+    # x_i = rng.uniform(position_bounds[0], position_bounds[1]).astype(float)
+    # v_i = rng.uniform(velocity_bounds[0], velocity_bounds[1]).astype(float)
+    # spin_i = rng.uniform(spin_bounds[0], spin_bounds[1]).astype(float)
 
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
     simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep, rng=rng)

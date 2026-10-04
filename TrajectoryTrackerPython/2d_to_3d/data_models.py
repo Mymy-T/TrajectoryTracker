@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import Enum
 import math
 import numpy as np
 
@@ -110,6 +111,41 @@ ADDITIONAL_CALIBRATION_KEYPOINT_NAMES = (
 )
 
 
+class ShotType(Enum):
+    FH = 1 # Forehand groundstroke
+    BH = 2 # Backhand groundstroke
+
+
+@dataclass(frozen=True)
+class FHInitialDistributionParameters:
+    
+    x_lower_bound: np.ndarray = field(default_factory=lambda: np.array([-CourtProperties().court_length/2, 0.5, 0.0]))
+    x_upper_bound: np.ndarray = field(default_factory=lambda: np.array([-7*CourtProperties().court_length/16, 1.5, CourtProperties().court_width/2]))
+
+    v_mu: np.ndarray = field(default_factory=lambda: np.array([31.0, 5.0, 0.0]))
+    v_stdev: np.ndarray = field(default_factory=lambda: np.array([3.5, 1.0, 2.0]))
+    v_z_positional_bias: float = 5 # Shifts v_z_mu based on normalized z position
+
+    w_mu: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, -220.0]))
+    w_stdev: np.ndarray = field(default_factory=lambda: np.array([1.0, 5.0, 50.0]))
+
+
+
+@dataclass(frozen=True)
+class BHInitialDistributionParameters:
+    
+    x_lower_bound: np.ndarray = field(default_factory=lambda: np.array([-CourtProperties().court_length/2, 0.5, -CourtProperties().court_width/2]))
+    x_upper_bound: np.ndarray = field(default_factory=lambda: np.array([-7*CourtProperties().court_length/16, 1.5, 0]))
+
+    v_mu: np.ndarray = field(default_factory=lambda: np.array([29.0, 5.0, 0.0]))
+    v_stdev: np.ndarray = field(default_factory=lambda: np.array([3.5, 1.0, 2.0]))
+    v_z_positional_bias: float = 5 # Shifts v_z_mu based on normalized z position
+
+    w_mu: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, -150.0]))
+    w_stdev: np.ndarray = field(default_factory=lambda: np.array([1.0, 5.0, 50.0]))
+    
+
+
 @dataclass
 class TrajectoryGenerationSettings:
     """
@@ -122,12 +158,16 @@ class TrajectoryGenerationSettings:
     hit_zone_bounds - Used as bounds to define the hit area if racket hits are enabled; each bound is fractional, ranging from 0 (net) to 1/2 (baseline)
     """
     bounces: bool = True
-    racket_hits: bool = False
-    position_bounds: tuple[list, list] = None
-    velocity_bounds: tuple[list, list] = None
-    spin_bounds: tuple[list, list] = None
-    num_hits_range: tuple[int, int] = (2, 5)
-    hit_zone_bounds: tuple[float, float] = (3/8, 1/2)
+    racket_hits: bool = True
+    fh_dist: FHInitialDistributionParameters = FHInitialDistributionParameters()
+    bh_dist: BHInitialDistributionParameters = BHInitialDistributionParameters()
+    middle_third_fh_prob: float = 0.5
+
+    # position_bounds: tuple[list, list] = None
+    # velocity_bounds: tuple[list, list] = None
+    # spin_bounds: tuple[list, list] = None
+    num_hits_range: tuple[int, int] = (4, 4)
+    hit_zone_bounds: tuple[float, float] = (7/16, 1/2)
 
 
 @dataclass

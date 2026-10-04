@@ -51,7 +51,8 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
     rows = []
     for camera_config_id in tqdm(range(data_gen_settings.num_camera_configs), desc="Camera configs"):
 
-        intrinsics, extrinsics = proj.sample_camera_config(rng, base_intrinsics, base_extrinsics)
+        cam_config_settings = settings.SyntheticDataGeneration().camera_config_sampling_settings
+        intrinsics, extrinsics = proj.sample_camera_config(rng, base_intrinsics, base_extrinsics, sampling_settings=cam_config_settings)
         projection_matrix = proj.create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
 
         for trajectory_id in tqdm(range(data_gen_settings.trajectories_per_config), desc=f"Trajectories for camera config {camera_config_id}", leave=False):

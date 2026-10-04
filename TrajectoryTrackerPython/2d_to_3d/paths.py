@@ -5,14 +5,15 @@ class Paths:
     def __init__(self):
 
         data_gen_settings = SyntheticDataGeneration()
+        camera_perspective_name = data_gen_settings.camera_perspective_name
 
         base_folder = os.path.dirname(os.path.abspath(__file__)) # paths.py should be on same level as other files
 
-        self.raw_data_folder = os.path.join(base_folder, "raw_data") # Simulated trajectories at the simulation timestep; camera independent
+        base_raw_data_folder = os.path.join(base_folder, "raw_data") # Simulated trajectories at the simulation timestep; camera independent; separate data is kept for each camera perspective mode, as all derivatives (processed, datasets) can be quickly/easily re-derived from it
+        self.raw_data_folder = os.path.join(base_raw_data_folder, camera_perspective_name)
+
         self.processed_data_folder = os.path.join(base_folder, "processed_data") # Resampled to the target frame rate and projected through a camera
         self.dataset_csv_folder = os.path.join(base_folder, "datasets")
-
-        camera_perspective_name = data_gen_settings.camera_perspective_name
 
         intrinsics_folder = os.path.join(base_folder, "intrinsics")
         self.base_intrinsics_path = os.path.join(intrinsics_folder, f"{camera_perspective_name}_intrinsics.json") # intrinsics being saved as json is artifact from exporting intrinsics from iPhone camera
@@ -31,6 +32,9 @@ class Paths:
 
         # TODO: Move the sample_img.png into the keypoints folder; each img/keypoint set should be its own subfolder within keypoints folder
 
+
+        if not os.path.exists(base_raw_data_folder):
+            os.mkdir(base_raw_data_folder)
 
         if not os.path.exists(self.raw_data_folder):
             os.mkdir(self.raw_data_folder)

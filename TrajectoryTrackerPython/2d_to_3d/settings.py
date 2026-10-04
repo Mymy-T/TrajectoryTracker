@@ -17,7 +17,7 @@ torch_dtype = _torch_numpy_dtype_dict[dtype]
 estimate_height_from_diameter = False
 
 simulation_timestep = 0.001
-target_fps = 60.0 # Simulated trajectories interpolated to this fps; 1/target_fps must be >= simulation_timestep
+target_fps = 30.0 # Simulated trajectories interpolated to this fps; 1/target_fps must be >= simulation_timestep
 
 class CameraPerspectiveMode(Enum):
     BROADCAST = 1
@@ -33,8 +33,8 @@ class NetPostType(Enum):
 
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
-    num_camera_configs: int = 10
-    trajectories_per_config: int = 50
+    num_camera_configs: int = 3
+    trajectories_per_config: int = 5
 
     trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(racket_hits=True))
     camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings(intrinsics_jitter=50.0, translation_jitter=0.5, rotation_jitter_deg=0.5))
