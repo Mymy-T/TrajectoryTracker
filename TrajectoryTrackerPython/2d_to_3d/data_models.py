@@ -132,6 +132,6 @@ class TrajectoryGenerationSettings:
 
 @dataclass
 class CameraConfigSamplingSettings:
-    intrinsics_jitter: float = 5.0
-    translation_jitter: float = 0.3
-    rotation_jitter_deg: float = 2.0
+    intrinsics_jitter: float
+    translation_jitter: float
+    rotation_jitter_deg: float

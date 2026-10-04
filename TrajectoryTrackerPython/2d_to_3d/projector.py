@@ -262,7 +262,7 @@ def create_projection_matrix(simplified_intrinsics: np.ndarray, extrinsics: np.n
     return np.matmul(_expand_intrinsics_matrix(simplified_intrinsics), extrinsics) # https://visionbook.mit.edu/imaging_geometry.html#full-camera-model
 
 # MARK: Sample Camera Config
-def sample_camera_config(rng: np.random.Generator, base_intrinsics: np.ndarray, base_extrinsics: np.ndarray, sampling_settings=CameraConfigSamplingSettings()):
+def sample_camera_config(rng: np.random.Generator, base_intrinsics: np.ndarray, base_extrinsics: np.ndarray, sampling_settings: CameraConfigSamplingSettings):
     """
     Perturbs a base camera's intrinsics and extrinsics
     - intrinsics_jitter - max abs pixels of noise added to each of fx, fy, cx, cy

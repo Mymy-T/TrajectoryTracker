@@ -37,7 +37,7 @@ class SyntheticDataGeneration:
     trajectories_per_config: int = 50
 
     trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(racket_hits=True))
-    camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings())
+    camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings(intrinsics_jitter=50.0, translation_jitter=0.5, rotation_jitter_deg=0.5))
 
     camera_perspective_mode: CameraPerspectiveMode = CameraPerspectiveMode.BROADCAST
     camera_perspective_name: str = field(init=False)
