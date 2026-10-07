@@ -146,7 +146,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     trajectory_loss = loss_log.trajectory_loss
     below_ground_loss = loss_log.below_ground_loss
 
-    for idx, batch in enumerate(train_loader): # Batch is (inputs, coord_labels, eot_labels, lengths)
+    for idx, batch in enumerate(train_loader): # See return of collate_func in dataset.py to see batch contents
 
         if idx < resume_batch_idx:
             continue
@@ -164,7 +164,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters=diameters, bounce_token_labels=bounce_token_labels)
 
         loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
-        loss.backward() # Accumulates gradients if zero grad isn't called
+        loss.backward()
 
         total_loss += loss.item() # Aggregates losses for logging
         eot_loss += loss_components[0].item()

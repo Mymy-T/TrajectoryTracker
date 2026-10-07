@@ -43,6 +43,9 @@ class SyntheticDataGeneration:
     camera_perspective_name: str = field(init=False)
     intrinsics_known: bool = field(init=False)
 
+    delayed_hit_secs_after_bounce: float = 0.4 # Amount of time (in s) after a bounce before the next hit should occur if the hit is delayed due to being below the min hit height
+    min_hit_height_frac: float = 0.2 # This is the minimum height as a fraction of the max bounce hit below which a hit is delayed until after a bounce
+
 
     expected_image_size = (1920, 1080) # (width, height); theoretically enforced by ball_detection's video_downloader.py
     corner_keypoint_set: WorldCoordSet = WorldCoordSet.INNER_BASELINE
@@ -65,5 +68,5 @@ class SyntheticDataGeneration:
 
 @dataclass(frozen=True)
 class Model:
-    bounce_token_nms_radius: int = 3
+    bounce_token_nms_radius: int = 3 # For non-maximum supression
     bounce_token_min_prob: int = 0.9

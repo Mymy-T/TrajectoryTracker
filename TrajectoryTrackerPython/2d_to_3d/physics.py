@@ -3,6 +3,7 @@ from data_models import BallState, BallProperties, BounceProperties, CourtProper
 from enum import Enum
 import math
 import numpy as np
+from settings import SyntheticDataGeneration
 from visualizer import plot_3d_trajectory
 
 
@@ -16,9 +17,10 @@ class PhysicsSimulation():
     """
     Class for simulating ball trajectories. The simulator's copy of the initial ball state will be modified in place.
     """
-    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), bounce_properties = BounceProperties(), environment_properties = EnvironmentProperties(), rng: np.random.Generator = None, generation_settings: TrajectoryGenerationSettings = None):
+    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), bounce_properties = BounceProperties(), environment_properties = EnvironmentProperties(), synth_data_settings = SyntheticDataGeneration(), rng: np.random.Generator = None, generation_settings: TrajectoryGenerationSettings = None):
         self.ball_state = copy.deepcopy(initial_state)
         self.generation_settings = generation_settings if generation_settings is not None else TrajectoryGenerationSettings() # Source of the FH/BH shot distributions used for racket hits
+        self.synth_data_settings = synth_data_settings
         self.ball_properties = ball_properties
         self.court_properties = court_properties
         self.bounce_properties = bounce_properties
@@ -126,11 +128,21 @@ class PhysicsSimulation():
         eot = []
         bounce_tokens = []
         i = 0
+        hit_depth_threshold = self.rng.uniform(hit_zone_bounds[0] * l, hit_zone_bounds[1] * l) # Varied each time
+        local_max_bounce_height = 0
+        delayed_hit_pending = False
+        delayed_hit_bounce_occured = False
+        N_DELAY_TIMESTEPS = round(self.synth_data_settings.delayed_hit_secs_after_bounce / self.timestep)
+        delayed_timesteps_since_bounce = 0
         while True:
 
             trajectory.append(self.ball_state.position.copy())
+            local_max_bounce_height = max(self.ball_state.position[1], local_max_bounce_height)
             times.append(i * self.timestep)
             eot.append(0.0)
+
+            if delayed_hit_bounce_occured and delayed_hit_pending:
+                delayed_timesteps_since_bounce += 1
 
             if len(bounce_tokens) == i: # Prevent double counting if a bounce already added a 1.0 token
                 bounce_tokens.append(0.0)
@@ -145,16 +157,32 @@ class PhysicsSimulation():
                 self.ball_state.position = np.array([x, 0, z])
                 bounce_tokens.append(1.0)
 
+
+            perform_hit = False
             if num_hits < target_hits:
 
-                crossed_into_far_side = (x != 0 and math.copysign(1.0, x) == -leg_start_sign)
-                in_possible_hit_zone = (crossed_into_far_side and (hit_zone_bounds[0] * l <= abs(x) <= hit_zone_bounds[1] * l))
-                hit_depth_threshold = self.rng.uniform(hit_zone_bounds[0] * l, hit_zone_bounds[1] * l) # Varied each time
-                in_hit_zone = (in_possible_hit_zone and (abs(x) >= hit_depth_threshold)) # > since ball is moving towards court ends when crossed into far side
+                if not delayed_hit_pending: # Check zone/bounce cap triggers only if not already awaiting for a hit after a bounce
 
-                bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= bounce_trigger_cap)
+                    crossed_into_far_side = (x != 0 and math.copysign(1.0, x) == -leg_start_sign)
+                    in_possible_hit_zone = (crossed_into_far_side and (hit_zone_bounds[0] * l <= abs(x)))
+                    in_hit_zone = (in_possible_hit_zone and (abs(x) >= hit_depth_threshold)) # > since ball is moving towards court ends when crossed into far side
 
-                if in_hit_zone or bounce_trigger_cap_reached:
+                    bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= bounce_trigger_cap)
+                    
+                    if in_hit_zone or bounce_trigger_cap_reached:
+                        if not bounce_trigger_cap_reached and self.ball_state.position[1] < (self.synth_data_settings.min_hit_height_frac * local_max_bounce_height):
+                            delayed_hit_pending = True 
+                            
+                        else:
+                            perform_hit = True
+                    
+
+                if delayed_hit_pending and delayed_timesteps_since_bounce == N_DELAY_TIMESTEPS:
+                    perform_hit = True
+                
+                
+                if perform_hit:
+
                     eot[i - 1] = 1.0 # Set EOT flag to true for the timestep right before the racket hit; i is always >= 1 here due to already being incremented
 
                     vf, wf = self._simulate_racket_hit()
@@ -165,15 +193,28 @@ class PhysicsSimulation():
                     bounces_since_last_hit = 0
 
                     leg_start_sign = math.copysign(1.0, x) if x != 0 else leg_start_sign
+                
+                    delayed_hit_pending = False
+                    delayed_hit_bounce_occured = False
+                    delayed_timesteps_since_bounce = 0
+                    local_max_bounce_height = 0
+
+                    hit_depth_threshold = self.rng.uniform(hit_zone_bounds[0] * l, hit_zone_bounds[1] * l) # Varied each time
 
                 elif landed:
                     vf, wf = self._compute_bounce()
                     self.ball_state.velocity = vf
                     self.ball_state.spin = wf
 
+                    local_max_bounce_height = 0
+
+                    if delayed_hit_pending:
+                        delayed_hit_bounce_occured = True
+                        delayed_timesteps_since_bounce = 0
+                    
                     bounces_since_last_hit += 1
 
-            elif landed:
+            elif landed: # Bounce after target hits is achieved
                 vf, wf = self._compute_bounce()
                 self.ball_state.velocity = vf
                 self.ball_state.spin = wf
