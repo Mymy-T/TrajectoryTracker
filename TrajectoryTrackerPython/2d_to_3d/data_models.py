@@ -122,7 +122,7 @@ class FHInitialDistributionParameters:
     x_lower_bound: np.ndarray = field(default_factory=lambda: np.array([-CourtProperties().court_length/2, 0.5, 0.0]))
     x_upper_bound: np.ndarray = field(default_factory=lambda: np.array([-7*CourtProperties().court_length/16, 1.5, CourtProperties().court_width/2]))
 
-    v_mu: np.ndarray = field(default_factory=lambda: np.array([31.0, 5.0, 0.0]))
+    v_mu: np.ndarray = field(default_factory=lambda: np.array([25.0, 5.0, 0.0]))
     v_stdev: np.ndarray = field(default_factory=lambda: np.array([3.5, 1.0, 2.0]))
     v_z_positional_bias: float = 5 # Shifts v_z_mu based on normalized z position
 
@@ -137,7 +137,7 @@ class BHInitialDistributionParameters:
     x_lower_bound: np.ndarray = field(default_factory=lambda: np.array([-CourtProperties().court_length/2, 0.5, -CourtProperties().court_width/2]))
     x_upper_bound: np.ndarray = field(default_factory=lambda: np.array([-7*CourtProperties().court_length/16, 1.5, 0]))
 
-    v_mu: np.ndarray = field(default_factory=lambda: np.array([29.0, 5.0, 0.0]))
+    v_mu: np.ndarray = field(default_factory=lambda: np.array([22.0, 5.0, 0.0]))
     v_stdev: np.ndarray = field(default_factory=lambda: np.array([3.5, 1.0, 2.0]))
     v_z_positional_bias: float = 5 # Shifts v_z_mu based on normalized z position
 
@@ -151,17 +151,14 @@ class TrajectoryGenerationSettings:
     """
     bounces - Whether bounces will be incorporated into ball trajectory
     racket_hits - Whether racket hits will be incorprated into ball trajectory
-    position_bounds - Tuple of position vectors that bounds where the position can be sampled from after a racket hit
-    velocity_bounds - Tuple of velocity vectors that bounds where the velocity can be sampled from after a racket hit
-    spin_bounds - Tuple of angular velocity vectors that bounds where the angular velocity can be sampled from after a racket hit
-    num_hits_range - The min and max number of racket hits in a trajectory is racket hits are enabled
+    fh_dist, bh_dist - Initial position bounds and velocity/spin Gaussians for forehands/backhands; defined for a shot toward +x and mirrored for shots toward -x. Used for the initial shot and for every racket hit
+    num_hits_range - The min and max number of racket hits in a trajectory if racket hits are enabled
     hit_zone_bounds - Used as bounds to define the hit area if racket hits are enabled; each bound is fractional, ranging from 0 (net) to 1/2 (baseline)
     """
     bounces: bool = True
     racket_hits: bool = True
-    fh_dist: FHInitialDistributionParameters = FHInitialDistributionParameters()
-    bh_dist: BHInitialDistributionParameters = BHInitialDistributionParameters()
-    middle_third_fh_prob: float = 0.5
+    fh_dist: FHInitialDistributionParameters = field(default_factory=FHInitialDistributionParameters)
+    bh_dist: BHInitialDistributionParameters = field(default_factory=BHInitialDistributionParameters)
 
     # position_bounds: tuple[list, list] = None
     # velocity_bounds: tuple[list, list] = None
