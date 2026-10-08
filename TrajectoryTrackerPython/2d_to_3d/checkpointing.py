@@ -107,21 +107,18 @@ class ResumeCheckpointManager:
     def delete(self):
         os.remove(self.resume_checkpoint_path) # Remove resume_checkpoint.pt, everything has been completed for this run
 
+
 # MARK: Loss Log
 class LossLog:
 
-    def __init__(self, total_loss: float, loss_components: tuple):
+    def __init__(self, total_loss: float, loss_components: dict):
         self.total_loss = total_loss
-        self.eot_loss = loss_components[0]
-        self.trajectory_loss = loss_components[1]
-        self.below_ground_loss = loss_components[2]
+        self.loss_components = loss_components
     
 
     def get_loss_dict(self):
         return {
             "total_loss": self.total_loss,
-            "eot_loss": self.eot_loss,
-            "trajectory_loss": self.trajectory_loss,
-            "below_ground_loss": self.below_ground_loss
+            **self.loss_components
         }
     

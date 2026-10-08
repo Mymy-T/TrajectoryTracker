@@ -1,11 +1,24 @@
 from data_models import BallProperties
-import numpy as np
+from enum import StrEnum
+import os
+from paths import Paths
 from projector import dehomogenize
 import settings
 import torch
 import torch.nn.functional as F
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from typing import Protocol
+import warnings
+
+
+class ModelType(StrEnum):
+    FullModel = ""
+    BounceModel = "bm"
+
+
+class TypedModel(Protocol):
+    model_type: ModelType
 
 
 def _safe_divide(numerator, denominator, eps=1e-8):
@@ -67,16 +80,41 @@ def _run_lstm_with_packing(lstm, x, lengths):
 
 
 # MARK: Full Network
-class TrajectoryReconstructionNetwork(nn.Module):
+class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
 
-    def __init__(self):
+    def __init__(self, saved_bounce_model_name: str = None):
+        """
+        saved_bounce_model_name is just the name of the saved model folder, without any extensions or parent folders
+        """
         super().__init__()
 
+
+        saved_bounce_model = None
+
+        if saved_bounce_model_name is not None:
+
+            saved_bounce_model_path = os.path.join(Paths().model_saves_folder, saved_bounce_model_name, f"{saved_bounce_model_name}.pt")
+
+            if os.path.isfile(saved_bounce_model_path):
+                saved_bounce_model = FullBounceNetwork()
+                full_saved_bounce_model_state = torch.load(saved_bounce_model_path, weights_only=True)
+                saved_bounce_model.load_state_dict(full_saved_bounce_model_state)
+        
+        else:
+            warnings.warn("saved_bounce_model_name is None. This will give bad validation/test results!")
+
+
+        self.model_type = ModelType.FullModel
+
+
         self.model_settings = settings.Model()
-        self.bounce_network = BounceNetwork()
+        self.bounce_network = saved_bounce_model.bounce_network if saved_bounce_model is not None else BounceNetwork()
         self.eot_network = EOTNetwork()
         self.height_network = HeightNetwork()
         self.refinement_network = RefinementNetwork()
+
+        if saved_bounce_model_name is not None and saved_bounce_model is None:
+            raise ValueError(f"Unable to load saved bounce network named '{saved_bounce_model_name}'.")
 
         self.to(dtype=settings.torch_dtype)
 
@@ -93,8 +131,8 @@ class TrajectoryReconstructionNetwork(nn.Module):
         L = x.shape[1]
         mask = _build_validity_mask(lengths, L) # (N, L)
 
-        c, d = self.obtain_ray_representation(x, intrinsics, extrinsics)
-        p = self.obtain_intersection_representation(c, d) # (N, L, 4)
+        c, d = obtain_ray_representation(x, intrinsics, extrinsics)
+        p = obtain_intersection_representation(c, d) # (N, L, 4)
         p = _mask(p, mask) # Zero out padded positions
 
         delta_p = torch.zeros_like(p)
@@ -130,54 +168,6 @@ class TrajectoryReconstructionNetwork(nn.Module):
         epsilons = _mask(epsilons, mask)
 
         return final_coords, epsilons # (N, L, 3), (N, L, 1)
-
-
-    def obtain_ray_representation(self, x: torch.Tensor, intrinsics: torch.Tensor, extrinsics: torch.Tensor):
-        """
-        x is (N, L, 2); sequence of image coords
-        intrinsics is (N, 3, 3)
-        extrinsics is (N, 4, 4)
-        Returns c, d; both of shapes (N, L, 3)
-        """
-        N, L = x.shape[0], x.shape[1]
-        E_inv = torch.linalg.inv(extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
-
-        origin_homogeneous = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=E_inv.dtype, device=E_inv.device)
-        c_batch = dehomogenize(torch.matmul(E_inv, origin_homogeneous)) # (N, 3)
-        c = c_batch.unsqueeze(1).expand(N, L, 3)  # (N, L, 3)
-
-        fx = intrinsics[:, 0, 0].unsqueeze(-1)  # (N, 1)
-        fy = intrinsics[:, 1, 1].unsqueeze(-1)
-        cx = intrinsics[:, 0, 2].unsqueeze(-1)
-        cy = intrinsics[:, 1, 2].unsqueeze(-1)
-
-        d_X_cam = (x[:, :, 0] - cx) / fx  # (N, L)
-        d_Y_cam = (x[:, :, 1] - cy) / fy  # (N, L)
-        d_Z_cam = torch.ones((N, L), dtype=x.dtype, device=x.device)
-        d_extra_cam = torch.zeros((N, L), dtype=x.dtype, device=x.device) # Homogeneous direction coord
-        d_cam = torch.stack((d_X_cam, d_Y_cam, d_Z_cam, d_extra_cam), dim=-1) # (N, L, 4)
-        d_cam = d_cam.unsqueeze(-1) # (N, L, 4, 1)
-
-        # Squeeze because matmul final shape is (N, L, 4, 1); E_inv changes from (N, 1, 4, 4) to (N, L, 4, 4) by broadcasting
-        d = dehomogenize(torch.matmul(E_inv.unsqueeze(1), d_cam).squeeze(-1)) # (N, L, 3)
-
-        return c, d
-
-
-    def obtain_intersection_representation(self, c: torch.Tensor, d: torch.Tensor):
-        """
-        c & d both (N, L, 3)
-        """
-        c_x, c_y, c_z = c[:, :, 0], c[:, :, 1], c[:, :, 2] # (N, L)
-        d_x, d_y, d_z = d[:, :, 0], d[:, :, 1], d[:, :, 2] # (N, L)
-
-        pg_x = c_x - c_y * _safe_divide(d_x, d_y) # (N, L)
-        pg_z = c_z - c_y * _safe_divide(d_z, d_y) # (N, L)
-        pv_y = c_y - c_x * _safe_divide(d_y, d_x) # (N, L)
-        pv_z = c_z - c_x * _safe_divide(d_z, d_x) # (N, L)
-
-        return torch.stack((pg_x, pg_z, pv_y, pv_z), dim=-1) # (N, L, 4)
-    
 
     def estimate_height_from_diameters(self, c: torch.Tensor, d: torch.Tensor, diameters: torch.Tensor, intrinsics: torch.Tensor, lengths: torch.Tensor):
         """
@@ -255,6 +245,40 @@ class TrajectoryReconstructionNetwork(nn.Module):
         z = c_z + (h - c_y) * _safe_divide(d_z, d_y) # (N, L)
 
         return torch.stack((x, h, z), dim=-1) # (N, L, 3)
+
+
+# MARK: Full Bounce Network
+class FullBounceNetwork(nn.Module, TypedModel):
+
+    def __init__(self):
+        super().__init__()
+
+        self.model_type = ModelType.BounceModel
+
+        self.bounce_network = BounceNetwork()
+        self.to(dtype=settings.torch_dtype)
+    
+    # Forward keeps same signiture as the full network
+    def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor):
+        """
+        See TrajectoryReconstructionNetwork for docs on params
+        """
+        lengths = lengths.to(x.device)
+        L = x.shape[1]
+        mask = _build_validity_mask(lengths, L) # (N, L)
+
+        c, d = obtain_ray_representation(x, intrinsics, extrinsics)
+        p = obtain_intersection_representation(c, d) # (N, L, 4)
+        p = _mask(p, mask) # Zero out padded positions
+
+        delta_p = torch.zeros_like(p)
+        delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; (N, L, 4)
+        difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
+        delta_p = _mask(delta_p, difference_mask)
+
+        bounce_tokens = self.bounce_network(delta_p, lengths) # (N, L, 1)
+        return bounce_tokens
+
 
 
 # MARK: Bounce Network
@@ -523,3 +547,63 @@ class RefinementNetwork(nn.Module):
         position_deltas = _mask(position_deltas, _build_validity_mask(lengths, x.shape[1]))
 
         return position_deltas  # (N, L, 3)
+
+
+
+def obtain_ray_representation(x: torch.Tensor, intrinsics: torch.Tensor, extrinsics: torch.Tensor):
+    """
+    x is (N, L, 2); sequence of image coords
+    intrinsics is (N, 3, 3)
+    extrinsics is (N, 4, 4)
+    Returns c, d; both of shapes (N, L, 3)
+    """
+
+    if x.shape[2] != 2:
+        raise ValueError("x must have shape (N, L, 2)")
+    if intrinsics.shape[1] != 3 or intrinsics.shape[2] != 3:
+        raise ValueError("intrinsics must have shape (N, 3, 3)")
+    if extrinsics.shape[1] != 4 or extrinsics.shape[2] != 4:
+        raise ValueError("extrinsics must have shape (N, 4, 4)")
+
+    N, L = x.shape[0], x.shape[1]
+    E_inv = torch.linalg.inv(extrinsics) # Maps cam coords to world coords in homogenous form; (4, 4)
+
+    origin_homogeneous = torch.tensor([0.0, 0.0, 0.0, 1.0], dtype=E_inv.dtype, device=E_inv.device)
+    c_batch = dehomogenize(torch.matmul(E_inv, origin_homogeneous)) # (N, 3)
+    c = c_batch.unsqueeze(1).expand(N, L, 3)  # (N, L, 3)
+
+    fx = intrinsics[:, 0, 0].unsqueeze(-1)  # (N, 1)
+    fy = intrinsics[:, 1, 1].unsqueeze(-1)
+    cx = intrinsics[:, 0, 2].unsqueeze(-1)
+    cy = intrinsics[:, 1, 2].unsqueeze(-1)
+
+    d_X_cam = (x[:, :, 0] - cx) / fx  # (N, L)
+    d_Y_cam = (x[:, :, 1] - cy) / fy  # (N, L)
+    d_Z_cam = torch.ones((N, L), dtype=x.dtype, device=x.device)
+    d_extra_cam = torch.zeros((N, L), dtype=x.dtype, device=x.device) # Homogeneous direction coord
+    d_cam = torch.stack((d_X_cam, d_Y_cam, d_Z_cam, d_extra_cam), dim=-1) # (N, L, 4)
+    d_cam = d_cam.unsqueeze(-1) # (N, L, 4, 1)
+
+    # Squeeze because matmul final shape is (N, L, 4, 1); E_inv changes from (N, 1, 4, 4) to (N, L, 4, 4) by broadcasting
+    d = dehomogenize(torch.matmul(E_inv.unsqueeze(1), d_cam).squeeze(-1)) # (N, L, 3)
+
+    return c, d
+
+
+def obtain_intersection_representation(c: torch.Tensor, d: torch.Tensor):
+    """
+    c & d both (N, L, 3)
+    """
+
+    if c.shape[2] != 3 or d.shape[2] != 3:
+        raise ValueError("c & d must both have shapes (N, L, 3)")
+
+    c_x, c_y, c_z = c[:, :, 0], c[:, :, 1], c[:, :, 2] # (N, L)
+    d_x, d_y, d_z = d[:, :, 0], d[:, :, 1], d[:, :, 2] # (N, L)
+
+    pg_x = c_x - c_y * _safe_divide(d_x, d_y) # (N, L)
+    pg_z = c_z - c_y * _safe_divide(d_z, d_y) # (N, L)
+    pv_y = c_y - c_x * _safe_divide(d_y, d_x) # (N, L)
+    pv_z = c_z - c_x * _safe_divide(d_z, d_x) # (N, L)
+
+    return torch.stack((pg_x, pg_z, pv_y, pv_z), dim=-1) # (N, L, 4)

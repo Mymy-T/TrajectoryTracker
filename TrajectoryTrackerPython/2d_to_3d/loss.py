@@ -12,6 +12,7 @@ def _build_length_mask(lengths, max_len):
     return positions < lengths.unsqueeze(-1) # (N, L) from broadcasting
 
 
+
 class FullLoss(nn.Module):
 
     def __init__(self, eot_imbalance_weight, loss_weights=None):
@@ -44,8 +45,7 @@ class FullLoss(nn.Module):
 
         total_loss = (self.loss_weights[0] * eot_loss) + (self.loss_weights[1] * trajectory_loss) + (self.loss_weights[2] * below_ground_loss)
 
-        return total_loss, (eot_loss, trajectory_loss, below_ground_loss)
-
+        return total_loss, {"EOT Loss": eot_loss, "Trajectory Loss": trajectory_loss, "Below Ground Loss": below_ground_loss}
 
 
 class EOTLoss(nn.Module):
@@ -67,6 +67,28 @@ class EOTLoss(nn.Module):
         bce = F.binary_cross_entropy(pred, target, weight=weight, reduction="none") # (N, L)
         mask = _build_length_mask(lengths, pred.shape[1]) # (N, L)
         return bce[mask].sum() / mask.sum().clamp(min=1)
+    
+
+class BounceTokenLoss(nn.Module):
+
+    def __init__(self, imbalance_weight):
+        super().__init__()
+        self.imbalance_weight = imbalance_weight
+    
+
+    def forward(self, pred, target, lengths):
+        """
+        - pred is (N, L, 1)
+        - target is (N, L, 1)
+        - lengths is (N,)
+        """
+        pred = pred.squeeze(-1) # (N, L)
+        target = target.squeeze(-1) # (N, L)
+        weight = torch.where(target == 1, self.imbalance_weight, 1.0) # Per-element weight for positive (EOT) class
+        bce = F.binary_cross_entropy(pred, target, weight=weight, reduction="none") # (N, L)
+        mask = _build_length_mask(lengths, pred.shape[1]) # (N, L)
+        return bce[mask].sum() / mask.sum().clamp(min=1), {} # Extra dict represents loss components, which is empty in this case
+    
 
 
 class TrajectoryLoss(nn.Module):

@@ -1,6 +1,7 @@
 from checkpointing import CheckpointManager, ResumeCheckpointManager, LossLog
 from dataset import TrajectoryReconstructionDataset, DatasetType, collate_func
-from loss import FullLoss
+from loss import FullLoss, BounceTokenLoss
+from model import ModelType, TypedModel
 import os
 from paths import Paths
 import time
@@ -12,9 +13,11 @@ import settings
 device = settings.device
 
 
-def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name, resuming, verbose=True, max_train_seconds=None, train_dataset=None, valid_dataset=None, test_dataset=None):
+def train_and_evaluate(model: TypedModel, lr, batch_size, max_checkpoints, max_epochs, name, resuming, verbose=True, max_train_seconds=None, train_dataset=None, valid_dataset=None, test_dataset=None):
     # MARK: Training Setup
     paths = Paths()
+
+    name += f"_{model.model_type.value}"
 
     log_path = os.path.join(paths.logs_folder, name)
     model_save_folder = os.path.join(paths.model_saves_folder, name)
@@ -58,7 +61,15 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
 
     # Optimizer and loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    loss_fn = FullLoss(eot_imbalance_weight=1.0) # TODO: Find eot imbalance weight
+
+    if model.model_type == ModelType.FullModel: # TODO: Find imbalance weights for each individual classification loss
+        loss_fn = FullLoss(eot_imbalance_weight=1.0)
+        loss_log = LossLog(0, {"EOT Loss": 0, "Trajectory Loss": 0, "Below Ground Loss": 0}) # Only used in _train_epoch
+
+    elif model.model_type == ModelType.BounceModel:
+        loss_fn = BounceTokenLoss(imbalance_weight=1.0)
+        loss_log = LossLog(0, {}) # Only used in _train_epoch
+
 
     # MARK: Training
     start_epoch = 1
@@ -66,7 +77,6 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
 
     # Only used in _train_epoch
     resume_batch_idx = 0
-    loss_log = LossLog(0, (0, 0, 0))
 
     if resuming:
         resume_state = resume_manager.load(model, optimizer)
@@ -86,9 +96,8 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
         # Reset back to initial state, resuming has been completed; everything should run normally again
         resume_batch_idx = 0
         loss_log.total_loss = 0
-        loss_log.eot_loss = 0
-        loss_log.trajectory_loss = 0
-        loss_log.below_ground_loss = 0
+        for key in loss_log.loss_components.keys():
+            loss_log.loss_components[key] = 0
 
         if time_limit_reached:
             # Training is paused, not complete: skip validation, model selection, and finalization for this partial epoch; resume later using resume_checkpoint.pt
@@ -103,9 +112,8 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
 
         # Logging
         writer.add_scalars(main_tag="Total Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch)
-        writer.add_scalars(main_tag="EOT Loss", tag_scalar_dict={"Train": train_loss_components[0], "Valid": valid_loss_components[0]}, global_step=epoch)
-        writer.add_scalars(main_tag="Trajectory Loss", tag_scalar_dict={"Train": train_loss_components[1], "Valid": valid_loss_components[1]}, global_step=epoch)
-        writer.add_scalars(main_tag="Below Ground Loss", tag_scalar_dict={"Train": train_loss_components[2], "Valid": valid_loss_components[2]}, global_step=epoch)
+        for key in train_loss_components.keys(): # NOTE: train and valid loss components have the same keys since they're from the same loss_fn
+            writer.add_scalars(main_tag=key, tag_scalar_dict={"Train": train_loss_components[key], "Valid": valid_loss_components[key]}, global_step=epoch)
 
         writer.flush()
 
@@ -122,9 +130,8 @@ def train_and_evaluate(model, lr, batch_size, max_checkpoints, max_epochs, name,
     test_loss, test_loss_components = evaluate(model, loss_fn, test_dataloader, valid=False, verbose=verbose)
 
     writer.add_scalars(main_tag="Total Loss", tag_scalar_dict={"Test": test_loss}, global_step=1) 
-    writer.add_scalars(main_tag="EOT Loss", tag_scalar_dict={"Test": test_loss_components[0]}, global_step=1)
-    writer.add_scalars(main_tag="Trajectory Loss", tag_scalar_dict={"Test": test_loss_components[1]}, global_step=1)
-    writer.add_scalars(main_tag="Below Ground Loss", tag_scalar_dict={"Test": test_loss_components[2]}, global_step=1)
+    for key, value in test_loss_components.items():
+        writer.add_scalars(main_tag=key, tag_scalar_dict={"Test": value}, global_step=1)
 
     writer.flush()
     writer.close()
@@ -142,39 +149,36 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     time_limit_reached = False
 
     total_loss = loss_log.total_loss
-    eot_loss = loss_log.eot_loss
-    trajectory_loss = loss_log.trajectory_loss
-    below_ground_loss = loss_log.below_ground_loss
+    loss_components = loss_log.loss_components
 
     for idx, batch in enumerate(train_loader): # See return of collate_func in dataset.py to see batch contents
 
         if idx < resume_batch_idx:
             continue
+        
+        inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
 
-        inputs = batch[0].to(device) # (N, L, 2)
-        coord_labels = batch[1].to(device) # (N, L, 3)
-        eot_labels = batch[2].to(device) # (N, L, 1)
-        bounce_token_labels = batch[3].to(device) # (N, L, 1)
-        lengths = batch[4].to(device) # (N,)
-        intrinsics = batch[5].to(device) # (N, 3, 3)
-        extrinsics = batch[6].to(device) # (N, 4, 4)
-        diameters = batch[7].to(device) # (N, 2)
+        
+        if model.model_type == ModelType.FullModel:
 
+            pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters, bounce_token_labels) # (N, L, 3), (N, L, 1); teacher forcing for bounce_tokens during training
+            loss, computed_loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
 
-        pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters=diameters, bounce_token_labels=bounce_token_labels)
+        elif model.model_type == ModelType.BounceModel:
+            
+            pred_bounce_tokens = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
+            loss, computed_loss_components = loss_fn(pred_bounce_tokens, bounce_token_labels, lengths)
 
-        loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
         loss.backward()
 
         total_loss += loss.item() # Aggregates losses for logging
-        eot_loss += loss_components[0].item()
-        trajectory_loss += loss_components[1].item()
-        below_ground_loss += loss_components[2].item()
+        for key, value in computed_loss_components.items():
+            loss_components[key] += value.item()
 
         optimizer.step()
         optimizer.zero_grad()
 
-        loss_log = LossLog(total_loss, (eot_loss, trajectory_loss, below_ground_loss))
+        loss_log = LossLog(total_loss, loss_components)
         resume_manager.save(model, optimizer, epoch, idx + 1, loss_log, best_model_metrics) # Resume on next batch
 
         if max_train_seconds is not None and (time.monotonic() - training_start_time) >= max_train_seconds:
@@ -193,9 +197,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     
 
     avg_loss = total_loss / num_batches
-    avg_eot_loss = eot_loss / num_batches
-    avg_trajectory_loss = trajectory_loss / num_batches
-    avg_below_ground_loss = below_ground_loss / num_batches
+    avg_component_losses = {key: value / num_batches for key, value in loss_components.items()}
 
 
     if not time_limit_reached:
@@ -203,11 +205,11 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
             print(f"Avg loss for epoch {epoch}: {avg_loss:.8f}") # Epoch is indexed from 1
             print("------------------------------------------------")
 
-    return avg_loss, (avg_eot_loss, avg_trajectory_loss, avg_below_ground_loss), time_limit_reached # avg_loss unused if time_limit_reached
+    return avg_loss, avg_component_losses, time_limit_reached # avg_loss unused if time_limit_reached
     
 
 # MARK: Evaluate
-def evaluate(model, loss_fn, data_loader, valid, verbose=True):
+def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
 
     model.eval()
     num_batches = len(data_loader)
@@ -218,36 +220,31 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
     with torch.inference_mode():
 
         total_loss = 0
-        eot_loss = 0
-        trajectory_loss = 0
-        below_ground_loss = 0
+        loss_components = {}
 
         for idx, batch in enumerate(data_loader): # Batch is (inputs, coord_labels, eot_labels, lengths)
 
-            inputs = batch[0].to(device) # (N, L, 2)
-            coord_labels = batch[1].to(device) # (N, L, 3)
-            eot_labels = batch[2].to(device) # (N, L, 1)
-            lengths = batch[3].to(device) # (N,)
-            intrinsics = batch[4].to(device) # (N, 3, 3)
-            extrinsics = batch[5].to(device) # (N, 4, 4)
-            diameters = batch[6].to(device) # (N, 2)
+            inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
 
-            pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
+            if model.model_type == ModelType.FullModel:
 
-            loss, loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
+                pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
+                loss, computed_loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
+
+            elif model.model_type == ModelType.BounceModel:
+                
+                pred_bounce_tokens = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
+                loss, computed_loss_components = loss_fn(pred_bounce_tokens, bounce_token_labels, lengths)
 
             total_loss += loss.item()
-            eot_loss += loss_components[0].item()
-            trajectory_loss += loss_components[1].item()
-            below_ground_loss += loss_components[2].item()
+            for key, value in computed_loss_components.items():
+                loss_components[key] = loss_components.get(key, 0) + value.item()
 
             if verbose:
                 print(f"Avg loss for batch {idx + 1}: {loss.item():.8f}")
 
         avg_loss = total_loss / num_batches
-        avg_eot_loss = eot_loss / num_batches
-        avg_trajectory_loss = trajectory_loss / num_batches
-        avg_below_ground_loss = below_ground_loss / num_batches
+        avg_component_losses = {key: value / num_batches for key, value in loss_components.items()}
 
         if verbose:
             if valid:
@@ -255,8 +252,19 @@ def evaluate(model, loss_fn, data_loader, valid, verbose=True):
             else:
                 name = "test"
             print(f"Avg {name} loss: {avg_loss:.8f}")
-            print(f"Avg {name} EOT loss: {avg_eot_loss:.8f}")
-            print(f"Avg {name} trajectory loss: {avg_trajectory_loss:.8f}")
-            print(f"Avg {name} below ground loss: {avg_below_ground_loss:.8f}")
+            for key, value in avg_component_losses.items():
+                print(f"Avg {name} {key}: {value:.8f}") # key contains both loss component name and "loss"
         
-        return avg_loss, (avg_eot_loss, avg_trajectory_loss, avg_below_ground_loss)
+        return avg_loss, avg_component_losses
+
+
+def _read_batch(batch):
+    inputs = batch[0].to(device) # (N, L, 2)
+    coord_labels = batch[1].to(device) # (N, L, 3)
+    eot_labels = batch[2].to(device) # (N, L, 1)
+    bounce_token_labels = batch[3].to(device) # (N, L, 1)
+    lengths = batch[4].to(device) # (N,)
+    intrinsics = batch[5].to(device) # (N, 3, 3)
+    extrinsics = batch[6].to(device) # (N, 4, 4)
+    diameters = batch[7].to(device) # (N, 2)
+    return inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters
