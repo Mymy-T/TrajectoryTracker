@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from data_models import TrajectoryGenerationSettings, CameraConfigSamplingSettings
+from data_models import TrajectoryGenerationSettings, CameraConfigSamplingSettings, TrainingConfig
 from enum import Enum
 import numpy as np
 import torch
@@ -70,3 +70,21 @@ class SyntheticDataGeneration:
 class Model:
     bounce_token_nms_radius: int = 3 # For non-maximum supression
     bounce_token_min_prob: int = 0.9
+
+
+@dataclass
+class Training:
+    train_config: TrainingConfig = field(default_factory=lambda: TrainingConfig(
+        lr=1e-5,
+        batch_size=8,
+        max_epochs=10,
+        name="", # Temp, passed in when script called
+        resuming=False, # Same as name
+        eot_imbalance_weight=48.1026,
+        bounce_token_imbalance_weight = 33.8182,
+        max_train_seconds=None, # Same as name
+        max_checkpoints=None # Same as name
+    ))
+    
+    
+

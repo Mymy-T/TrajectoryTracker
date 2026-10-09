@@ -1,4 +1,5 @@
 from checkpointing import CheckpointManager, ResumeCheckpointManager, LossLog
+from data_models import TrainingConfig
 from dataset import TrajectoryReconstructionDataset, DatasetType, collate_func
 from loss import FullLoss, BounceTokenLoss
 from model import ModelType, TypedModel
@@ -13,7 +14,22 @@ import settings
 device = settings.device
 
 
-def train_and_evaluate(model: TypedModel, lr, batch_size, max_checkpoints, max_epochs, name, resuming, verbose=True, max_train_seconds=None, train_dataset=None, valid_dataset=None, test_dataset=None):
+def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose):
+
+    lr = train_config.lr
+    batch_size = train_config.batch_size
+    max_epochs = train_config.max_epochs
+    name = train_config.name
+    resuming = train_config.resuming
+    eot_imbalance_weight = train_config.eot_imbalance_weight
+    bounce_token_imbalance_weight = train_config.bounce_token_imbalance_weight
+    max_train_seconds = train_config.max_train_seconds
+    max_checkpoints = train_config.max_checkpoints
+    train_dataset = train_config.custom_train_dataset # Make a new ddataset based on current saved data if this is None
+    valid_dataset = train_config.custom_valid_dataset
+    test_dataset = train_config.custom_test_dataset
+
+
     # MARK: Training Setup
     paths = Paths()
 
@@ -63,11 +79,11 @@ def train_and_evaluate(model: TypedModel, lr, batch_size, max_checkpoints, max_e
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if model.model_type == ModelType.FullModel: # TODO: Find imbalance weights for each individual classification loss
-        loss_fn = FullLoss(eot_imbalance_weight=1.0)
+        loss_fn = FullLoss(eot_imbalance_weight=eot_imbalance_weight)
         loss_log = LossLog(0, {"EOT Loss": 0, "Trajectory Loss": 0, "Below Ground Loss": 0}) # Only used in _train_epoch
 
     elif model.model_type == ModelType.BounceModel:
-        loss_fn = BounceTokenLoss(imbalance_weight=1.0)
+        loss_fn = BounceTokenLoss(imbalance_weight=bounce_token_imbalance_weight)
         loss_log = LossLog(0, {}) # Only used in _train_epoch
 
 
@@ -256,6 +272,10 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
                 print(f"Avg {name} {key}: {value:.8f}") # key contains both loss component name and "loss"
         
         return avg_loss, avg_component_losses
+
+
+def _compute_classification_metrics(model, data_loader):
+    pass # TODO: Potentially add precision, recall, F1, accuracy
 
 
 def _read_batch(batch):

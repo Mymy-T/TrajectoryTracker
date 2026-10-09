@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import math
 import numpy as np
+from torch.utils.data import Dataset
 
 @dataclass(frozen=True)
 class EnvironmentProperties:
@@ -172,3 +173,19 @@ class CameraConfigSamplingSettings:
     intrinsics_jitter: float
     translation_jitter: float
     rotation_jitter_deg: float
+
+
+@dataclass
+class TrainingConfig:
+    lr: float
+    batch_size: int
+    max_epochs: int
+    name: str
+    resuming: bool
+    eot_imbalance_weight: float
+    bounce_token_imbalance_weight: float
+    max_train_seconds: int | None
+    max_checkpoints: int | None
+    custom_train_dataset: Dataset | None = None
+    custom_valid_dataset: Dataset | None = None
+    custom_test_dataset: Dataset | None = None
