@@ -1,8 +1,5 @@
 import argparse
-from numpy import require
 from model import TrajectoryReconstructionNetwork, FullBounceNetwork
-from paths import Paths
-import torch
 from trainer import train_and_evaluate
 import settings
 
@@ -22,7 +19,7 @@ def main():
     name = args.name
 
     if args.type == "full":
-        model = TrajectoryReconstructionNetwork()
+        model = TrajectoryReconstructionNetwork(saved_bounce_model_name=f"{name}_bm")
     elif args.type == "bounce":
         model = FullBounceNetwork()
 

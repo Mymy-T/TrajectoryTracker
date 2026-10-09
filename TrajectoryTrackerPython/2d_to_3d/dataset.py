@@ -72,7 +72,7 @@ class TrajectoryReconstructionDataset(Dataset):
         self.data_folder = paths.processed_data_folder
 
         self.noise_2d = noise_2d
-        self.rng = np.random.default_rng(seed) # Used for adding random noise
+        self.rng_seed = seed # Stuff for adding random noise
         std_norm_dist = NormalDist(0, 1)
         p = within_noise_bound_prob/2 + 0.5
         self.sigma = noise_bound / std_norm_dist.inv_cdf(p)
@@ -110,7 +110,8 @@ class TrajectoryReconstructionDataset(Dataset):
             trajectory_diameters = torch.zeros((2,), dtype=settings.torch_dtype) # Placeholder; keeps the returned tuple's shape the same either way
 
         if self.noise_2d:
-            trajectory_noise_2d = torch.from_numpy(self.rng.normal(loc=0.0, scale=self.sigma, size=trajectory_2d.shape)).to(dtype=settings.torch_dtype)
+            rng = np.random.default_rng((self.rng_seed, idx)) # Tuple used so that the same seed is used for all generally, BUT the same noise (via idx) is used regardless of iteration number
+            trajectory_noise_2d = torch.from_numpy(rng.normal(loc=0.0, scale=self.sigma, size=trajectory_2d.shape)).to(dtype=settings.torch_dtype)
             trajectory_2d += trajectory_noise_2d
 
 

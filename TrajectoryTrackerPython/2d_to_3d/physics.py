@@ -221,8 +221,16 @@ class PhysicsSimulation():
 
             out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
             if num_hits >= target_hits and landed:
+                trajectory.append(self.ball_state.position.copy()) # Normally, the loop waits until the next iteration before adding the current position; there is no next iteration upon final break, so it's added here instead
+                eot.append(0.0)
+                times.append(i * self.timestep)
                 break
             if out_of_bounds:
+                trajectory.append(self.ball_state.position.copy()) # Same as above
+                eot.append(0.0)
+                if not landed:
+                    bounce_tokens.append(0.0)
+                times.append(i * self.timestep)
                 break
 
         return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.array(eot, dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
@@ -615,7 +623,8 @@ def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, bounce_
 
     # Bounce Tokens - rounded to nearest timestep
     bounce_token_indicies = np.nonzero(bounce_tokens)[0]
-    new_bounce_token_indicies = np.round(bounce_token_indicies * dt_0 / dt_1).astype(int).clip(0, M - 1)
+    new_bounce_token_indicies = np.round(bounce_token_indicies * dt_0 / dt_1).astype(int)
+    new_bounce_token_indicies = new_bounce_token_indicies[new_bounce_token_indicies < M] # Last bounce would be rounded to a timestep after the interpolated trajectory ended
     new_bounce_tokens = np.zeros((M,), dtype=np.float64)
     new_bounce_tokens[new_bounce_token_indicies] = 1.0
 

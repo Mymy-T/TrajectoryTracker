@@ -69,7 +69,7 @@ class SyntheticDataGeneration:
 @dataclass(frozen=True)
 class Model:
     bounce_token_nms_radius: int = 3 # For non-maximum supression
-    bounce_token_min_prob: int = 0.9
+    bounce_token_min_prob: float = 0.9
 
 
 @dataclass
@@ -81,7 +81,7 @@ class Training:
         name="", # Temp, passed in when script called
         resuming=False, # Same as name
         eot_imbalance_weight=48.1026,
-        bounce_token_imbalance_weight = 33.8182,
+        bounce_token_imbalance_weight = 38.8958,
         max_train_seconds=None, # Same as name
         max_checkpoints=None # Same as name
     ))

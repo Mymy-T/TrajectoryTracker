@@ -101,7 +101,7 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
                 saved_bounce_model.load_state_dict(full_saved_bounce_model_state)
         
         else:
-            warnings.warn("saved_bounce_model_name is None. This will give bad validation/test results!")
+            warnings.warn("saved_bounce_model_name is None. Training is fine b/c of teacher forcing, but this will give bad validation/test results!")
 
 
         self.model_type = ModelType.FullModel
@@ -491,7 +491,7 @@ class HeightNetwork(nn.Module):
 
         # Blend h_f and h_b when possible to get best estimate for h
         start_positions = bounce_positions.argmax(dim=1) # Is 0 if no bounces (since it always returns the index of the first largest number); (N, 1)
-        end_positions = L - 1 - torch.flip(bounce_positions, dims=[1]).argmax(dim=1) # Is L - 1 if no bounces (since the argmax always returns the index of the first largest number, which is 0 in the case of no bounces); (N, 1)
+        end_positions = lengths.unsqueeze(-1) - 1 - _reverse_valid_prefix(bounce_positions, lengths).argmax(dim=1) # Is lengths - 1 if no bounces (since the argmax always returns the index of the first largest number, which is 0 in the case of no bounces, end_position would be lengths - 1 in that case); (N, 1)
 
         positions = torch.arange(L, device=p.device, dtype=p.dtype).unsqueeze(0) # (1, L); zero-indexed
         positions = positions.expand(N, L) # All (N, L)

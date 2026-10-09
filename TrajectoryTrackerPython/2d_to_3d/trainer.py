@@ -211,7 +211,9 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         if time_limit_reached:
             break
     
-
+    if num_batches == 0:
+        raise RuntimeError("There is no training data.")
+    
     avg_loss = total_loss / num_batches
     avg_component_losses = {key: value / num_batches for key, value in loss_components.items()}
 
@@ -259,6 +261,11 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
             if verbose:
                 print(f"Avg loss for batch {idx + 1}: {loss.item():.8f}")
 
+        if num_batches == 0 and valid == True:
+            raise RuntimeError("There is no validation data.")
+        elif num_batches == 0 and valid == False:
+            raise RuntimeError("There is no test data.")
+        
         avg_loss = total_loss / num_batches
         avg_component_losses = {key: value / num_batches for key, value in loss_components.items()}
 
