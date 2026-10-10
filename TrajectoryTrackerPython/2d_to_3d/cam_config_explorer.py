@@ -411,7 +411,7 @@ class CamConfigExplorerApp(tk.Tk):
     def _get_sample_trajectory(self):
         if self._sample_trajectory is None:
             trajectory = generate_sample_trajectory(timestep=settings.simulation_timestep)[0] # (trajectory, times, eot, bounce_tokens)
-            step = max(1, int(round((1.0 / settings.target_fps) / settings.simulation_timestep))) # Only target_fps frames are ever seen by the model
+            step = max(1, int(round((1.0 / settings.SyntheticDataGeneration().target_fps) / settings.simulation_timestep))) # Only target_fps frames are ever seen by the model
             self._sample_trajectory = trajectory[::step]
         return self._sample_trajectory
 

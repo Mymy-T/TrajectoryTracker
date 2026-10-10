@@ -1,3 +1,4 @@
+from data_models import TrajectoryMode
 import numpy as np
 import os
 import pandas as pd
@@ -10,7 +11,7 @@ from tqdm import tqdm
 from trajectory_generator import remove_path_before
 
 
-def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_fps=settings.target_fps):
+def create_dataset():
     """
     - Builds the training dataset from the raw trajectories in the raw data folder
 
@@ -23,8 +24,8 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
     - Camera configs are assigned in blocks of trajectories_per_config
     - Interpolaion from simulation timestep to target_fps timestep is done before projection/diameter generation
     """
-
-    rng = np.random.default_rng(seed)
+    data_gen_settings = SyntheticDataGeneration()
+    rng = data_gen_settings.rng
     base_intrinsics, base_extrinsics = proj.get_base_camera_config()
 
     paths = Paths()
@@ -45,6 +46,7 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
     os.makedirs(trajectories_bounce_tokens_folder, exist_ok=True)
     os.makedirs(trajectories_diameter_folder, exist_ok=True)
 
+    target_fps = data_gen_settings.target_fps
     new_timestep = 1 / target_fps
 
     cam_config_settings = data_gen_settings.camera_config_sampling_settings
@@ -63,7 +65,8 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
             raw_eot = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_eot_path"]))
             raw_bounce_tokens = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_bounce_tokens_path"]))
 
-            trajectory, eot, bounce_tokens = interpolate_to_new_timestep(raw_trajectory, raw_eot, raw_bounce_tokens, settings.simulation_timestep, new_timestep)
+            simulation_timestep = data_gen_settings.trajectory_generation_settings.simulation_timestep
+            trajectory, eot, bounce_tokens = interpolate_to_new_timestep(raw_trajectory, raw_eot, raw_bounce_tokens, simulation_timestep, new_timestep)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
             diameters = proj.obtain_projected_diameters(trajectory, intrinsics, extrinsics)
 
@@ -81,6 +84,18 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
             np.save(trajectory_bounce_tokens_path, bounce_tokens)
             np.save(trajectory_diameter_path, diameters)
 
+            trajectory_generation_mode = data_gen_settings.trajectory_generation_settings.mode
+            match trajectory_generation_mode:
+                case TrajectoryMode.NO_BOUNCE:
+                    bounces = False
+                    racket_hits = False
+                case TrajectoryMode.BOUNCE_ONLY:
+                    bounces = True
+                    racket_hits = False
+                case TrajectoryMode.BOUNCE_AND_HIT:
+                    bounces = True
+                    racket_hits = True
+
             rows.append({
                 "camera_config_id": camera_config_id,
                 "trajectory_id": trajectory_id,
@@ -97,8 +112,8 @@ def create_dataset(data_gen_settings=SyntheticDataGeneration(), seed=0, target_f
                 "trajectory_diameter_path": remove_path_before(full_path=trajectory_diameter_path, first_part_to_keep="trajectories_diameter"),
                 "num_points": len(trajectory),
                 "timestep": new_timestep,
-                "bounces": data_gen_settings.trajectory_generation_settings.bounces,
-                "hits": data_gen_settings.trajectory_generation_settings.racket_hits
+                "bounces": bounces,
+                "hits": racket_hits
             })
 
     df = pd.DataFrame(rows)

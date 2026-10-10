@@ -18,13 +18,11 @@ def remove_path_before(full_path, first_part_to_keep):
     return os.sep.join(parts[idx:])
 
 
-def generate_raw_trajectories(data_gen_settings=SyntheticDataGeneration(), seed=0, timestep=settings.simulation_timestep):
+def generate_raw_trajectories(data_gen_settings=SyntheticDataGeneration()):
     """
     - Simulates raw 3D trajectories and writes them to the raw data folder
     - data.csv lists each trajectory's id and relative file location (for use in later processing)
     """
-
-    rng = np.random.default_rng(seed)
 
     paths = Paths()
     raw_data_folder = paths.raw_data_folder
@@ -42,7 +40,7 @@ def generate_raw_trajectories(data_gen_settings=SyntheticDataGeneration(), seed=
     rows = []
     for trajectory_id in tqdm(range(num_trajectories), desc="Trajectories"):
 
-        trajectory, times, eot, bounce_tokens = generate_random_trajectory(rng, timestep=timestep, generation_settings=data_gen_settings.trajectory_generation_settings)
+        trajectory, times, eot, bounce_tokens = generate_random_trajectory(data_gen_settings)
 
         trajectory_name = f"trajectory_{trajectory_id:05d}"
 
@@ -56,7 +54,7 @@ def generate_raw_trajectories(data_gen_settings=SyntheticDataGeneration(), seed=
 
         rows.append({
             "trajectory_id": trajectory_id,
-            "simulation_timestep": timestep,
+            "simulation_timestep": data_gen_settings.trajectory_generation_settings.simulation_timestep,
             "trajectory_3d_path": remove_path_before(full_path=trajectory_3d_path, first_part_to_keep="trajectories_3d"),
             "trajectory_eot_path": remove_path_before(full_path=trajectory_eot_path, first_part_to_keep="trajectories_eot"),
             "trajectory_bounce_tokens_path": remove_path_before(full_path=trajectory_bounce_tokens_path, first_part_to_keep="trajectories_bounce_tokens")

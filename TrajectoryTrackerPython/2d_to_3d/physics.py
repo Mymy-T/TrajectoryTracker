@@ -1,50 +1,43 @@
 import copy
-from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, TrajectoryGenerationSettings, ShotType
-from enum import Enum
+from data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, TrajectoryGenerationSettings, ShotType, TrajectoryMode, ShotDistribution
 import math
 import numpy as np
 from settings import SyntheticDataGeneration
 from visualizer import plot_3d_trajectory
 
 
-class TrajectoryMode(Enum):
-    NO_BOUNCE = "no_bounce"        # stop as soon as the ball would touch the ground
-    BOUNCE_ONLY = "bounce_only"    # a single shot with up to max_bounces ground bounces
-    BOUNCE_AND_HIT = "bounce_and_hit"  # a multi-hit rally (ground bounces + racket hits)
-
 # MARK: Physics Simulator
 class PhysicsSimulation():
     """
     Class for simulating ball trajectories. The simulator's copy of the initial ball state will be modified in place.
     """
-    def __init__(self, initial_state: BallState, simulation_timestep: float, ball_properties = BallProperties(), court_properties = CourtProperties(), bounce_properties = BounceProperties(), environment_properties = EnvironmentProperties(), synth_data_settings = SyntheticDataGeneration(), rng: np.random.Generator = None, generation_settings: TrajectoryGenerationSettings = None):
+    def __init__(self, initial_state: BallState, data_gen_settings: SyntheticDataGeneration):
+
         self.ball_state = copy.deepcopy(initial_state)
-        self.generation_settings = generation_settings if generation_settings is not None else TrajectoryGenerationSettings() # Source of the FH/BH shot distributions used for racket hits
-        self.synth_data_settings = synth_data_settings
-        self.ball_properties = ball_properties
-        self.court_properties = court_properties
-        self.bounce_properties = bounce_properties
-        self.environment_properties = environment_properties
-        self.timestep = simulation_timestep
-        self.rng = rng if rng is not None else np.random.default_rng()
+        self.rng = data_gen_settings.rng
+        self.gen_settings = data_gen_settings.trajectory_generation_settings
+
+        self.ball_properties = BallProperties()
+        self.bounce_properties = BounceProperties()
+        self.court_properties = CourtProperties()
+        self.environment_properties = EnvironmentProperties()
 
 
-    def compute_3d_trajectory(self, mode=TrajectoryMode.BOUNCE_ONLY, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, oob_buffer=3):
+    # MARK: Simulate Trajectory
+    def compute_3d_trajectory(self):
         """
-        - num_hits_range, hit_zone_bounds, bounce_trigger_cap only apply to TrajectoryMode.BOUNCE_AND_HIT
-        - max_bounces only applies to TrajectoryMode.BOUNCE_ONLY.
-        - oob_buffer is the extra length in meters added to length and width of court before ball is considered out of bounds; applied to all modes
         Returns trajectory, times, eot
         """
+        mode = self.gen_settings.mode
         if mode == TrajectoryMode.NO_BOUNCE:
-            return self._compute_trajectory_no_bounce(oob_buffer=oob_buffer)
+            return self._compute_trajectory_no_bounce()
         elif mode == TrajectoryMode.BOUNCE_ONLY:
-            return self._compute_trajectory_bounce_only(max_bounces=max_bounces, oob_buffer=oob_buffer)
+            return self._compute_trajectory_bounce_only()
         elif mode == TrajectoryMode.BOUNCE_AND_HIT:
-            return self._compute_trajectory_bounce_and_hit(num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, oob_buffer=oob_buffer)
+            return self._compute_trajectory_bounce_and_hit()
 
 
-    def _compute_trajectory_no_bounce(self, oob_buffer):
+    def _compute_trajectory_no_bounce(self):
         """
         Stops when ball touches the ground or when it leaves the court bounds
         """
@@ -54,7 +47,7 @@ class PhysicsSimulation():
         while True:
 
             trajectory.append(self.ball_state.position.copy())
-            times.append(i * self.timestep)
+            times.append(i * self.gen_settings.simulation_timestep)
 
             i += 1
             self._rk4_step()
@@ -62,7 +55,8 @@ class PhysicsSimulation():
             x, y, z = self.ball_state.position
             if y <= 0:
                 break
-
+            
+            oob_buffer = self.gen_settings.oob_buffer
             out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
             if out_of_bounds:
                 break
@@ -73,7 +67,7 @@ class PhysicsSimulation():
         return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
-    def _compute_trajectory_bounce_only(self, max_bounces, oob_buffer):
+    def _compute_trajectory_bounce_only(self):
         """
         Stops after max_bounces bounces or when ball leaves the court bounds
         """
@@ -85,7 +79,7 @@ class PhysicsSimulation():
         while True:
 
             trajectory.append(self.ball_state.position.copy())
-            times.append(i * self.timestep)
+            times.append(i * self.gen_settings.simulation_timestep)
 
             if len(bounce_tokens) == i: # Prevent double counting if a bounce adds a 1.0 token
                 bounce_tokens.append(0.0)
@@ -102,43 +96,55 @@ class PhysicsSimulation():
                 n_bounces += 1
                 bounce_tokens.append(1.0)
 
+            oob_buffer = self.gen_settings.oob_buffer
             out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
-            if n_bounces == max_bounces or out_of_bounds:
+            if n_bounces == self.gen_settings.max_bounces or out_of_bounds:
+                trajectory.append(self.ball_state.position.copy())
+                times.append(i * self.gen_settings.simulation_timestep)
+                if y > 0: # 1.0 tokens would have already been added
+                    bounce_tokens.append(0.0)
                 break
 
         return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.zeros(len(trajectory), dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
-    def _compute_trajectory_bounce_and_hit(self, num_hits_range, hit_zone_bounds, bounce_trigger_cap, oob_buffer):
+    def _compute_trajectory_bounce_and_hit(self):
         """
         - Ball hit once the its position reaches the hit_zone_bounds fraction of the court length, or after bounce_trigger_cap bounces without reaching that zone
         - Num hits of the rally is sampled once from num_hits_range; stops after that num of hits has occurred, once the ball lands
         - Also stops if ball goes out of bounds
         """
-        target_hits = int(self.rng.integers(num_hits_range[0], num_hits_range[1] + 1))
-        num_hits = 0
-        bounces_since_last_hit = 0
         l = self.court_properties.court_length
+
+        hit_zone_bounds = self.gen_settings.hit_zone_bounds
+        hit_depth_threshold = self.rng.uniform(hit_zone_bounds[0] * l, hit_zone_bounds[1] * l) # Varied each time
+
+        num_hits_range = self.gen_settings.num_hits_range
+        target_hits = int(self.rng.integers(num_hits_range[0], num_hits_range[1] + 1))
 
         start_x = self.ball_state.position[0]
         leg_start_sign = math.copysign(1.0, start_x) if start_x != 0 else 1.0
+
+        n_delay_timesteps = round(self.gen_settings.delayed_hit_secs_after_bounce / self.gen_settings.simulation_timestep)
 
         trajectory = []
         times = []
         eot = []
         bounce_tokens = []
         i = 0
-        hit_depth_threshold = self.rng.uniform(hit_zone_bounds[0] * l, hit_zone_bounds[1] * l) # Varied each time
-        local_max_bounce_height = 0
+        num_hits = 0
+        bounces_since_last_hit = 0
+        local_max_bounce_height = 0.0
         delayed_hit_pending = False
         delayed_hit_bounce_occured = False
-        N_DELAY_TIMESTEPS = round(self.synth_data_settings.delayed_hit_secs_after_bounce / self.timestep)
         delayed_timesteps_since_bounce = 0
+
+        
         while True:
 
             trajectory.append(self.ball_state.position.copy())
             local_max_bounce_height = max(self.ball_state.position[1], local_max_bounce_height)
-            times.append(i * self.timestep)
+            times.append(i * self.gen_settings.simulation_timestep)
             eot.append(0.0)
 
             if delayed_hit_bounce_occured and delayed_hit_pending:
@@ -167,17 +173,18 @@ class PhysicsSimulation():
                     in_possible_hit_zone = (crossed_into_far_side and (hit_zone_bounds[0] * l <= abs(x)))
                     in_hit_zone = (in_possible_hit_zone and (abs(x) >= hit_depth_threshold)) # > since ball is moving towards court ends when crossed into far side
 
-                    bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= bounce_trigger_cap)
+                    bounce_trigger_cap_reached = (landed and bounces_since_last_hit >= self.gen_settings.bounce_trigger_cap)
                     
                     if in_hit_zone or bounce_trigger_cap_reached:
-                        if not bounce_trigger_cap_reached and self.ball_state.position[1] < (self.synth_data_settings.min_hit_height_frac * local_max_bounce_height):
+
+                        if not bounce_trigger_cap_reached and self.ball_state.position[1] < (self.gen_settings.min_hit_height_frac * local_max_bounce_height):
                             delayed_hit_pending = True 
                             
                         else:
                             perform_hit = True
                     
 
-                if delayed_hit_pending and delayed_timesteps_since_bounce == N_DELAY_TIMESTEPS:
+                if delayed_hit_pending and delayed_timesteps_since_bounce == n_delay_timesteps:
                     perform_hit = True
                 
                 
@@ -219,23 +226,27 @@ class PhysicsSimulation():
                 self.ball_state.velocity = vf
                 self.ball_state.spin = wf
 
+            oob_buffer = self.gen_settings.oob_buffer
             out_of_bounds = (abs(x) > self.court_properties.court_length/2 + oob_buffer or abs(z) > self.court_properties.court_width/2 + oob_buffer)
+
             if num_hits >= target_hits and landed:
                 trajectory.append(self.ball_state.position.copy()) # Normally, the loop waits until the next iteration before adding the current position; there is no next iteration upon final break, so it's added here instead
                 eot.append(0.0)
-                times.append(i * self.timestep)
+                times.append(i * self.gen_settings.simulation_timestep)
                 break
+
             if out_of_bounds:
                 trajectory.append(self.ball_state.position.copy()) # Same as above
                 eot.append(0.0)
                 if not landed:
                     bounce_tokens.append(0.0)
-                times.append(i * self.timestep)
+                times.append(i * self.gen_settings.simulation_timestep)
                 break
 
         return np.array(trajectory, dtype=np.float64), np.array(times, dtype=np.float64), np.array(eot, dtype=np.float64), np.array(bounce_tokens, dtype=np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
+    # MARK: Compute Accelerations
     def _compute_accelerations(self, v, w):
         m = self.ball_properties.m
         A = self.ball_properties.A
@@ -245,7 +256,6 @@ class PhysicsSimulation():
         C_m = self.ball_properties.C_m
         g_scalar = self.environment_properties.g
         rho = self.environment_properties.rho
-        mu = self.environment_properties.mu
 
         eps = 1e-9 # Prevent division by 0
 
@@ -259,17 +269,21 @@ class PhysicsSimulation():
         else:
             F_m = np.zeros(3)
 
-        w_norm = np.linalg.norm(w)
-        if w_norm > eps:
-            tau_d = -0.5 * C_m * rho * A * np.linalg.norm(v)**2 * (w / w_norm)
+        if self.gen_settings.spin_decay:
+            w_norm = np.linalg.norm(w)
+            if w_norm > eps: # Prevent division by 0
+                tau_d = -0.5 * C_m * rho * A * np.linalg.norm(v)**2 * (w / w_norm)
+            else:
+                tau_d = np.zeros(3)
+            alpha_net = tau_d / I
         else:
-            tau_d = np.zeros(3)
+            alpha_net = np.zeros(3)
 
         a_net = (F_g + F_d + F_m) / m
-        alpha_net = tau_d / I
         return a_net, alpha_net
     
 
+    # MARK: Compute Bounce
     def _compute_bounce(self):
         """
         This bounce model assumes:
@@ -328,49 +342,40 @@ class PhysicsSimulation():
         w_f = np.array([w_fx, w_fy, w_fz])
 
         return v_f, w_f
-    
 
-    def _predict_landing(self, position, velocity, spin, dt=0.01, max_time=10.0):
+
+    # MARK: Simulate Racket Hit
+    def _simulate_racket_hit(self):
         """
-        - Cheap forward-Euler simulation starting from some state to estimate where ball will land
-        - Returns x, z (coords of landing) if ball landed within max_time else None
-        """
-        pos = np.array(position, dtype=float)
-        v = np.array(velocity, dtype=float)
-        w = np.array(spin, dtype=float)
-        t = 0.0
-        while t < max_time:
-            prev_pos = pos.copy() # Copy needed; pos is updated in place below
-            a, alpha = self._compute_accelerations(v, w)
-
-            pos += v * dt
-            v += a * dt
-            w += alpha * dt
-            t += dt
-
-            # Ensure that it passes the net
-            h = self.court_properties.net_height_at_posts
-            passed_net_x = ((pos[0] > 0 and prev_pos[0] < 0) or (pos[0] < 0 and prev_pos[0] > 0))
-            if passed_net_x:
-                y_min = min(pos[1], prev_pos[1])
-                if y_min <= h:
-                    return None # Ball hit net; regenerate
-                
-
-            if pos[1] <= 0.0 and prev_pos[1] > 0.0: # Linear interpolation to estimate exact bounce position
-                frac = prev_pos[1] / (prev_pos[1] - pos[1])
-                x_land = prev_pos[0] + frac * (pos[0] - prev_pos[0])
-                z_land = prev_pos[2] + frac * (pos[2] - prev_pos[2])
-                return x_land, z_land
-            
-        return None
-
-
-    def _simulate_racket_hit(self, max_attempts=20):
-        """
+        - Directly calls sample_shot(...)
         - Picks the FH/BH distribution from the hit position, then samples a shot back toward the other side of the court
         - Returns v_f, w_f
         """
+        shot_dist = _get_shot_distribution(self.gen_settings, self._classify_shot_type())
+        return self.sample_shot(shot_dist)
+
+
+    def _classify_shot_type(self):
+        """
+        Assumes right-handed players; the -x side player faces +x so their FH side is +z, and the +x side player's FH side is -z; used as a helper for _simulate_racket_hit to determine the shot for sample_shot
+        """
+        hit_pos = self.ball_state.position
+        on_near_side = (hit_pos[0] <= 0)
+        on_fh_side = (hit_pos[2] >= 0) if on_near_side else (hit_pos[2] <= 0)
+        return ShotType.FH if on_fh_side else ShotType.BH
+
+
+    # MARK: Sample a Shot
+    def sample_shot(self, shot_dist: ShotDistribution, max_attempts=20):
+        """
+        - Samples v and w from shot_dist for a shot hit from the current ball position toward the target_sign side of the court, rejecting candidates that wouldn't land in bounds; falls back to a deterministic safe shot ignoring drag/spin if no random candidate is accepted
+        - shot_dist is defined for a shot toward +x; for target_sign < 0 the sample is rotated 180 deg about the y axis (v_x, w_x, w_z flipped) to preserve spin in correct orientation
+        - Returns v_f, w_f
+        """
+
+        l = self.court_properties.court_length
+        w_court = self.court_properties.court_width
+
         hit_pos = self.ball_state.position
         hit_v = self.ball_state.velocity
 
@@ -382,28 +387,12 @@ class PhysicsSimulation():
         else:
             target_sign = 1.0
 
-        shot_dist = _get_shot_distribution(self.generation_settings, _classify_shot_type(hit_pos))
-        return self.sample_shot(shot_dist, target_sign, max_attempts=max_attempts)
-
-
-    def sample_shot(self, shot_dist, target_sign, max_attempts=20):
-        """
-        - Samples v and w from shot_dist for a shot hit from the current ball position toward the target_sign side of the court, rejecting candidates that wouldn't land in bounds; falls back to a deterministic safe shot ignoring drag/spin if no random candidate is accepted
-        - shot_dist is defined for a shot toward +x; for target_sign < 0 the sample is rotated 180 deg about the y axis (v_x, w_x, w_z flipped) to preserve spin in correct orientation
-        - Returns v_f, w_f
-        """
-        court_properties = self.court_properties
-        l = court_properties.court_length
-        w_court = court_properties.court_width
-
-        hit_pos = self.ball_state.position
-
         for _ in range(max_attempts):
 
-            v_candidate = _sample_velocity(self.rng, shot_dist.v_mu, shot_dist.v_stdev, shot_dist.v_z_positional_bias, hit_pos)
+            v_candidate = self._sample_velocity(self.rng, shot_dist.v_mu, shot_dist.v_stdev, shot_dist.v_z_positional_bias, hit_pos)
             v_candidate[0] = target_sign * v_candidate[0]
 
-            w_candidate = _sample_spin(self.rng, shot_dist.w_mu, shot_dist.w_stdev)
+            w_candidate = self._sample_spin(self.rng, shot_dist.w_mu, shot_dist.w_stdev)
             w_candidate[0] = target_sign * w_candidate[0]
             w_candidate[2] = target_sign * w_candidate[2]
 
@@ -438,9 +427,68 @@ class PhysicsSimulation():
         w_f = np.array([0.0, 1.0, 0.0])
 
         return v_f, w_f
-
-
     
+
+    def _sample_velocity(self, rng: np.random.Generator, v_mu, v_stdev, v_bias, x):
+        """
+        Helper that will sample a velocity for an initial hit or a subsequent racket hit
+        """
+        w = CourtProperties().court_width
+
+        # Adjust v_z_mu based on z position
+        x_z = x[2]
+        v_mu_adjusted = np.array(v_mu, dtype=float) # Copy so the shared distribution parameters are never modified
+        normalized_scale_factor = -x_z / (w/2)
+        v_mu_adjusted[2] = v_mu_adjusted[2] + normalized_scale_factor * v_bias
+
+        return rng.normal(loc=v_mu_adjusted, scale=v_stdev).astype(float) # (3,)
+    
+
+    def _sample_spin(self, rng: np.random.Generator, spin_mu, spin_stdev):
+        """
+        Helper that will sample a spin for an initial hit or a subsequent racket hit
+        """
+        return rng.normal(loc=spin_mu, scale=spin_stdev).astype(float) # (3,)
+    
+
+    def _predict_landing(self, position, velocity, spin, dt=0.01, max_time=10.0):
+        """
+        - Cheap forward-Euler simulation starting from some state to estimate where ball will land
+        - Returns x, z (coords of landing) if ball landed within max_time else None
+        - Helper function for sample_shot
+        """
+        pos = np.array(position, dtype=float)
+        v = np.array(velocity, dtype=float)
+        w = np.array(spin, dtype=float)
+        t = 0.0
+        while t < max_time:
+            prev_pos = pos.copy() # Copy needed; pos is updated in place below
+            a, alpha = self._compute_accelerations(v, w)
+
+            pos += v * dt
+            v += a * dt
+            w += alpha * dt
+            t += dt
+
+            # Ensure that it passes the net
+            h = self.court_properties.net_height_at_posts
+            passed_net_x = ((pos[0] > 0 and prev_pos[0] < 0) or (pos[0] < 0 and prev_pos[0] > 0))
+            if passed_net_x:
+                y_min = min(pos[1], prev_pos[1])
+                if y_min <= h:
+                    return None # Ball hit net; regenerate
+                
+
+            if pos[1] <= 0.0 and prev_pos[1] > 0.0: # Linear interpolation to estimate exact bounce position
+                frac = prev_pos[1] / (prev_pos[1] - pos[1])
+                x_land = prev_pos[0] + frac * (pos[0] - prev_pos[0])
+                z_land = prev_pos[2] + frac * (pos[2] - prev_pos[2])
+                return x_land, z_land
+            
+        return None
+
+
+    # MARK: Integrators
     def _forward_euler_integration_step(self): # Obsolete due to RK4
         """
         Ball state is modified in place.
@@ -461,7 +509,7 @@ class PhysicsSimulation():
         Ball state is modified in place.
         """
         state = self.ball_state
-        dt = self.timestep
+        dt = self.gen_settings.simulation_timestep
         x1 = state.position
         v1 = state.velocity
         w1 = state.spin
@@ -493,38 +541,6 @@ class PhysicsSimulation():
         state.spin = w_next
 
 
-
-def _resolve_trajectory_mode(bounces, racket_hits):
-    if not bounces:
-        return TrajectoryMode.NO_BOUNCE
-    
-    return TrajectoryMode.BOUNCE_AND_HIT if racket_hits else TrajectoryMode.BOUNCE_ONLY
-
-
-def _sample_velocity(rng: np.random.Generator, v_mu, v_stdev, v_bias, x):
-    w = CourtProperties().court_width
-    # Adjust v_z_mu based on z position
-    x_z = x[2]
-    v_mu_adjusted = np.array(v_mu, dtype=float) # Copy so the shared distribution parameters are never modified
-    normalized_scale_factor = -x_z / (w/2)
-    v_mu_adjusted[2] = v_mu_adjusted[2] + normalized_scale_factor * v_bias
-
-    return rng.normal(loc=v_mu_adjusted, scale=v_stdev).astype(float) # (3,)
-
-
-def _sample_spin(rng: np.random.Generator, spin_mu, spin_stdev):
-    return rng.normal(loc=spin_mu, scale=spin_stdev).astype(float) # (3,)
-
-
-def _classify_shot_type(hit_pos):
-    """
-    Assumes right-handed players; the -x side player faces +x so their FH side is +z, and the +x side player's FH side is -z
-    """
-    on_near_side = (hit_pos[0] <= 0)
-    on_fh_side = (hit_pos[2] >= 0) if on_near_side else (hit_pos[2] <= 0)
-    return ShotType.FH if on_fh_side else ShotType.BH
-
-
 def _get_shot_distribution(generation_settings: TrajectoryGenerationSettings, shot_type: ShotType):
     match shot_type:
         case ShotType.FH:
@@ -534,21 +550,19 @@ def _get_shot_distribution(generation_settings: TrajectoryGenerationSettings, sh
 
 
 # MARK: Example Trajectory
-def generate_sample_trajectory(timestep=0.001, bounces=True, racket_hits=False, num_hits_range=(2, 5), hit_zone_bounds=(3/8, 1/2), bounce_trigger_cap=3, max_bounces=4, rng: np.random.Generator = None):
-    court_properties = CourtProperties()
-    l = court_properties.court_length
-    w = court_properties.court_width
+def generate_sample_trajectory():
+    l = CourtProperties().court_length
+    w = CourtProperties().court_width
     x_i = np.array([-l/2, 1, -w/4]).astype(float)
     v_i = np.array([20, 7, 5]).astype(float)
     spin_i = np.array([0, 300, -300]).astype(float) # 300 rad/s topspin, 300 rad/s left sidespin; exaggerated to show spin effects
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
-    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep, rng=rng)
-    mode = _resolve_trajectory_mode(bounces, racket_hits)
-    return simulation.compute_3d_trajectory(mode=mode, num_hits_range=num_hits_range, hit_zone_bounds=hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, end_time
+    simulation = PhysicsSimulation(initial_state=ball_state, data_gen_settings=SyntheticDataGeneration()) # trajectory, times, eot, bounce_tokens
+    return simulation.compute_3d_trajectory()
 
 
 # MARK: Random Trajectory
-def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, generation_settings=TrajectoryGenerationSettings(), bounce_trigger_cap=3, max_bounces=4):
+def generate_random_trajectory(data_gen_settings: SyntheticDataGeneration):
     """
     Same as generate_sample_trajectory, but the initial ball state is sampled at random
 
@@ -556,23 +570,24 @@ def generate_random_trajectory(rng: np.random.Generator, timestep=0.001, generat
     - Defaults are centered around the same values used by generate_sample_trajectory
     - The same rng drives both the initial state sampling here and the in-rally racket hit sampling inside PhysicsSimulation (if racket_hits=True)
     """
+    rng = data_gen_settings.rng
+    gen_settings = data_gen_settings.trajectory_generation_settings
 
     shot_type = rng.choice(list(ShotType))
-    shot_gen_settings = _get_shot_distribution(generation_settings, shot_type)
+    shot_gen_settings = _get_shot_distribution(gen_settings, shot_type)
 
     position_bounds = (shot_gen_settings.x_lower_bound, shot_gen_settings.x_upper_bound)
     x_i = rng.uniform(position_bounds[0], position_bounds[1]).astype(float)
 
     ball_state = BallState(position=x_i, velocity=np.zeros(3), spin=np.zeros(3))
-    simulation = PhysicsSimulation(initial_state=ball_state, simulation_timestep=timestep, rng=rng, generation_settings=generation_settings)
+    simulation = PhysicsSimulation(initial_state=ball_state, data_gen_settings=data_gen_settings)
 
     # Initial shot uses the same in-bounds rejection sampling as racket hits; x_i is always on the -x side so the shot goes toward +x
-    v_i, spin_i = simulation.sample_shot(shot_gen_settings, target_sign=1.0)
+    v_i, spin_i = simulation.sample_shot(shot_gen_settings)
     simulation.ball_state.velocity = v_i
     simulation.ball_state.spin = spin_i
 
-    mode = _resolve_trajectory_mode(generation_settings.bounces, generation_settings.racket_hits)
-    return simulation.compute_3d_trajectory(mode=mode, num_hits_range=generation_settings.num_hits_range, hit_zone_bounds=generation_settings.hit_zone_bounds, bounce_trigger_cap=bounce_trigger_cap, max_bounces=max_bounces) # trajectory, times, eot
+    return simulation.compute_3d_trajectory() # trajectory, times, eot, bounce_tokens
 
 
 # MARK: Timestep Interpolation
@@ -612,11 +627,6 @@ def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, bounce_
 
     # EOT - floored to be timestep before event
     eot_indices = np.nonzero(eot)[0]
-    # eot_timesteps = eot_indices * dt_0
-    # normalized_remainders = np.remainder(eot_timesteps, dt_1) / dt_1
-    # round_up = normalized_remainders >= 0.5
-    # new_eot_indices = np.floor(eot_timesteps / dt_1)
-    # new_eot_indices[round_up] = new_eot_indices[round_up] + 1
     new_eot_indices = np.floor(eot_indices * dt_0 / dt_1).astype(int)
     new_eot = np.zeros((M,), dtype=np.float64)
     new_eot[new_eot_indices] = 1.0

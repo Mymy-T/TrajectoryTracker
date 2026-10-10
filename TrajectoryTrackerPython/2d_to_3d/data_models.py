@@ -3,6 +3,7 @@ from enum import Enum
 import math
 import numpy as np
 from torch.utils.data import Dataset
+from typing import Protocol
 
 @dataclass(frozen=True)
 class EnvironmentProperties:
@@ -15,6 +16,7 @@ class EnvironmentProperties:
     rho: float = 1.205
     mu: float = 1.81e-5
 
+
 @dataclass
 class BallState:
     """
@@ -26,6 +28,7 @@ class BallState:
     position: np.ndarray
     velocity: np.ndarray
     spin: np.ndarray
+
 
 @dataclass
 class BallProperties:
@@ -42,9 +45,6 @@ class BallProperties:
     R: float = 0.0325
     A: float = field(init=False) 
     I: float = field(init=False)
-    # I: float = 3.155e-5 # NOTE: This value may differ from the value used in the bounce model, as the bounce model assumed I = 2/3 * m * R^2; fixing this discrepancy could be a TODO
-    # C_d: float = 0.53 # TODO: Change as needed, do more research on this
-    # C_l: float = 0.4 # TODO: Placeholder value
     C_m: float = 0.01 # TODO: Figure out if this is in units of m or dimensionless and if there's a typo in the paper
 
     def __post_init__(self):
@@ -61,7 +61,6 @@ class BallProperties:
         return (2.591 * (s) ** -1.877 + 4.809) ** -0.529
     
 
-
 @dataclass(frozen=True)
 class BounceProperties:
     """
@@ -70,6 +69,7 @@ class BounceProperties:
     """
     e: float = 0.75 # Dignall, 2004
     mu: float = 0.55 # Dignall, 2004
+
 
 @dataclass(frozen=True)
 class CourtProperties:
@@ -116,9 +116,27 @@ class ShotType(Enum):
     FH = 1 # Forehand groundstroke
     BH = 2 # Backhand groundstroke
 
+class TrajectoryMode(Enum):
+    NO_BOUNCE = "no_bounce"        # Stop as soon as the ball would touch the ground
+    BOUNCE_ONLY = "bounce_only"    # A single shot with up to max_bounces ground bounces
+    BOUNCE_AND_HIT = "bounce_and_hit"  # A multi-hit rally (ground bounces + racket hits)
+
+
+class ShotDistribution(Protocol):
+    x_lower_bound: np.ndarray
+    x_upper_bound: np.ndarray
+
+    v_mu: np.ndarray
+    v_stdev: np.ndarray
+    v_z_positional_bias: float
+
+    w_mu: np.ndarray
+    w_stdev: np.ndarray
+
+
 
 @dataclass(frozen=True)
-class FHInitialDistributionParameters:
+class FHInitialDistributionParameters(ShotDistribution):
     
     x_lower_bound: np.ndarray = field(default_factory=lambda: np.array([-CourtProperties().court_length/2, 0.5, 0.0]))
     x_upper_bound: np.ndarray = field(default_factory=lambda: np.array([-7*CourtProperties().court_length/16, 1.5, CourtProperties().court_width/2]))
@@ -131,9 +149,8 @@ class FHInitialDistributionParameters:
     w_stdev: np.ndarray = field(default_factory=lambda: np.array([1.0, 5.0, 50.0]))
 
 
-
 @dataclass(frozen=True)
-class BHInitialDistributionParameters:
+class BHInitialDistributionParameters(ShotDistribution):
     
     x_lower_bound: np.ndarray = field(default_factory=lambda: np.array([-CourtProperties().court_length/2, 0.5, -CourtProperties().court_width/2]))
     x_upper_bound: np.ndarray = field(default_factory=lambda: np.array([-7*CourtProperties().court_length/16, 1.5, 0]))
@@ -144,28 +161,35 @@ class BHInitialDistributionParameters:
 
     w_mu: np.ndarray = field(default_factory=lambda: np.array([0.0, 0.0, -150.0]))
     w_stdev: np.ndarray = field(default_factory=lambda: np.array([1.0, 5.0, 50.0]))
-    
 
 
 @dataclass
 class TrajectoryGenerationSettings:
     """
-    bounces - Whether bounces will be incorporated into ball trajectory
-    racket_hits - Whether racket hits will be incorprated into ball trajectory
-    fh_dist, bh_dist - Initial position bounds and velocity/spin Gaussians for forehands/backhands; defined for a shot toward +x and mirrored for shots toward -x. Used for the initial shot and for every racket hit
-    num_hits_range - The min and max number of racket hits in a trajectory if racket hits are enabled
-    hit_zone_bounds - Used as bounds to define the hit area if racket hits are enabled; each bound is fractional, ranging from 0 (net) to 1/2 (baseline)
+    - simulation_timestep: Timestep used in RK4 integrator
+    - mode: The type of trajectories to be generated (e.g. w/o bounce or hits, w/ bounce only, or w/ bounce and hits)
+    - spin_decay: Whether or not the model should take into account spin decay effects arising from aerodynamic forces
+    - oob_buffer: Extra length in meters added to length and width of court before ball is considered out of bounds; applied to all modes
+    - max_bounces: Max number of bounces before trajectory ends; if mode=BOUNCE_ONLY
+    - bounce_trigger_cap: Number of bounces before a hit is forcefully triggered; if mode=BOUNCE_AND_HIT
+    - num_hits_range: The min and max number of racket hits in a trajectory; if mode=BOUNCE_AND_HIT
+    - hit_zone_bounds: Used as bounds to define the hit area; each bound is fractional, ranging from 0 (net) to 1/2 (baseline); if mode=BOUNCE_AND_HIT
+    - min_hit_height_frac: The ball must be above this fraction of the max height obtained during the CURRENT bounce/trajectory fragment to be hit in the current fragment; else it will be delayed to after a bounce; if mode=BOUNCE_AND_HIT
+    - delayed_hit_secs_after_bounce: The ball must wait this many seconds after a bounce to be hit if a delayed hit is pending; if mode=BOUNCE_AND_HIT
+    - fh_dist, bh_dist: Initial position bounds and velocity/spin Gaussians for forehands/backhands; defined for a shot toward +x and mirrored for shots toward -x. Used for the initial shot and for every racket hit if if mode=BOUNCE_AND_HIT
     """
-    bounces: bool = True
-    racket_hits: bool = True
-    fh_dist: FHInitialDistributionParameters = field(default_factory=FHInitialDistributionParameters)
-    bh_dist: BHInitialDistributionParameters = field(default_factory=BHInitialDistributionParameters)
-
-    # position_bounds: tuple[list, list] = None
-    # velocity_bounds: tuple[list, list] = None
-    # spin_bounds: tuple[list, list] = None
-    num_hits_range: tuple[int, int] = (4, 4)
-    hit_zone_bounds: tuple[float, float] = (7/16, 1/2)
+    simulation_timestep: float
+    mode: TrajectoryMode
+    spin_decay: bool
+    oob_buffer: int
+    max_bounces: int
+    bounce_trigger_cap: int
+    num_hits_range: tuple[int, int]
+    hit_zone_bounds: tuple[float, float]
+    min_hit_height_frac: float
+    delayed_hit_secs_after_bounce: int
+    fh_dist: FHInitialDistributionParameters = field(default_factory=lambda: FHInitialDistributionParameters())
+    bh_dist: BHInitialDistributionParameters = field(default_factory=lambda: BHInitialDistributionParameters())
 
 
 @dataclass

@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from data_models import TrajectoryGenerationSettings, CameraConfigSamplingSettings, TrainingConfig
+from data_models import TrajectoryGenerationSettings, CameraConfigSamplingSettings, TrainingConfig, TrajectoryMode
 from enum import Enum
 import numpy as np
 import torch
@@ -15,9 +15,6 @@ if dtype not in _torch_numpy_dtype_dict:
 torch_dtype = _torch_numpy_dtype_dict[dtype]
 
 estimate_height_from_diameter = False
-
-simulation_timestep = 0.001
-target_fps = 30.0 # Simulated trajectories interpolated to this fps; 1/target_fps must be >= simulation_timestep
 
 class CameraPerspectiveMode(Enum):
     BROADCAST = 1
@@ -38,30 +35,48 @@ class DataSplitMode(Enum):
 
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
+
+    # UNIVERSAL RNG
+    rng: np.random.Generator = np.random.default_rng(seed=67)
+
+    # NUMBER OF TRAJECTORIES
     num_camera_configs: int = 3
     trajectories_per_config: int = 5
 
-    trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(racket_hits=True))
-    camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings(intrinsics_jitter=50.0, translation_jitter=0.5, rotation_jitter_deg=0.5))
+    # PHYSICS GENERATION SETTINGS
+    trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(
+        simulation_timestep=0.001,
+        mode=TrajectoryMode.BOUNCE_AND_HIT,
+        spin_decay=False,
+        oob_buffer=3,
+        max_bounces=4,
+        bounce_trigger_cap=3,
+        num_hits_range=(4, 4),
+        hit_zone_bounds=(7/16, 1/2),
+        min_hit_height_frac=0.2,
+        delayed_hit_secs_after_bounce=0.4
+    ))
 
+    # PROJECTION/INTERPOLATION SETTINGS
     camera_perspective_mode: CameraPerspectiveMode = CameraPerspectiveMode.BROADCAST
     camera_perspective_name: str = field(init=False)
     intrinsics_known: bool = field(init=False)
-
-    delayed_hit_secs_after_bounce: float = 0.4 # Amount of time (in s) after a bounce before the next hit should occur if the hit is delayed due to being below the min hit height
-    min_hit_height_frac: float = 0.2 # This is the minimum height as a fraction of the max bounce hit below which a hit is delayed until after a bounce
-
-
     expected_image_size = (1920, 1080) # (width, height); theoretically enforced by ball_detection's video_downloader.py
     corner_keypoint_set: WorldCoordSet = WorldCoordSet.INNER_BASELINE
     net_post_type: NetPostType = NetPostType.SINGLES # Change based on sample img
+    camera_config_sampling_settings: CameraConfigSamplingSettings = field(default_factory=lambda: CameraConfigSamplingSettings(
+        intrinsics_jitter=50.0,
+        translation_jitter=0.5,
+        rotation_jitter_deg=0.5
+    ))
+    target_fps = 30.0 # Simulated trajectories interpolated to this fps; 1/target_fps must be >= simulation_timestep
 
 
     # Data Splitting
+    split_seed: int = 67 # Separate seed involved in pandas df sampling
     split_mode: DataSplitMode = DataSplitMode.camera_config_border
     train_prop: float = 0.7
     valid_prop: float = 0.15
-    split_seed: int = 0
 
     def __post_init__(self):
 
