@@ -31,6 +31,11 @@ class NetPostType(Enum):
     SINGLES = 1
     DOUBLES = 2
 
+class DataSplitMode(Enum):
+    camera_config_border = 0 # Split only at different camera configs
+    no_border = 1 # Split anywhere
+
+
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
     num_camera_configs: int = 3
@@ -50,6 +55,13 @@ class SyntheticDataGeneration:
     expected_image_size = (1920, 1080) # (width, height); theoretically enforced by ball_detection's video_downloader.py
     corner_keypoint_set: WorldCoordSet = WorldCoordSet.INNER_BASELINE
     net_post_type: NetPostType = NetPostType.SINGLES # Change based on sample img
+
+
+    # Data Splitting
+    split_mode: DataSplitMode = DataSplitMode.camera_config_border
+    train_prop: float = 0.7
+    valid_prop: float = 0.15
+    split_seed: int = 0
 
     def __post_init__(self):
 
@@ -86,5 +98,5 @@ class Training:
         max_checkpoints=None # Same as name
     ))
     
-    
+
 

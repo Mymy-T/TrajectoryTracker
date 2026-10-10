@@ -1,14 +1,19 @@
-from enum import Enum
 import math
 import os
 import pandas as pd
 from paths import Paths
+from settings import DataSplitMode, SyntheticDataGeneration
 
-class DataSplitMode(Enum):
-    camera_config_border = 0 # Split only at different camera configs
-    no_border = 1 # Split anywhere
 
-def split_data(dataset_folder, out_path, mode, train_prop, valid_prop, seed=0):
+def split_data(): # Wrapper function; directly uses settings.py
+    """
+    Wrapper function that calls _split_data(...) with values from settings.py
+    """
+    split_settings = SyntheticDataGeneration()
+    _split_data(dataset_folder=Paths().processed_data_folder, out_path=Paths().dataset_csv_folder, mode=split_settings.split_mode, train_prop=split_settings.train_prop, valid_prop=split_settings.valid_prop, seed=split_settings.split_seed)
+
+
+def _split_data(dataset_folder, out_path, mode, train_prop, valid_prop, seed):
     """
     - dataset_folder must contain dataset.csv (written by dataset_creator.py), with one row per (camera config, trajectory) example
     - Sizes of train, valid, and test datasets are approximate when mode != no_border
@@ -91,6 +96,4 @@ def _split_data_camera_config_borders(df, train_prop, valid_prop, out_path):
 
 
 if __name__ == "__main__":
-    paths = Paths()
-    mode = DataSplitMode.camera_config_border
-    split_data(dataset_folder=paths.processed_data_folder, out_path=paths.dataset_csv_folder, mode=mode, train_prop=0.7, valid_prop=0.15)
+    split_data()

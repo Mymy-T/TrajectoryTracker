@@ -186,6 +186,6 @@ class TrainingConfig:
     bounce_token_imbalance_weight: float
     max_train_seconds: int | None
     max_checkpoints: int | None
-    custom_train_dataset: Dataset | None = None
+    custom_train_dataset: Dataset | None = None # TODO: Deprecate this, data taken from specific project folders
     custom_valid_dataset: Dataset | None = None
     custom_test_dataset: Dataset | None = None
