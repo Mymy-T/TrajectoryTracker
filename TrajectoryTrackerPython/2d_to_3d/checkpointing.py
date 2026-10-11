@@ -8,10 +8,22 @@ device = settings.device
 
 def _compare_model_performance(checkpoint_model: tuple, new_model: tuple):
     """
-    checkpoint_model, new_model - tuples of (loss, epoch, full_loss)
+    checkpoint_model, new_model - tuples of (loss, epoch, full_loss) where full_loss is (total_loss, loss_components)
     Returns True is new model is better, False otherwise
     """
     return new_model[0] < checkpoint_model[0]
+
+def _get_selection_loss(model: TypedModel, total_loss, loss_components):
+    """
+    Return the scalar loss used for comparing model performance
+    """
+    match model.model_type:
+        case ModelType.FullModel:
+            selection_loss = loss_components["Trajectory Loss"]
+        case ModelType.BounceModel:
+            selection_loss = total_loss
+    
+    return selection_loss
 
 # MARK: Checkpoint Manager
 class CheckpointManager:
@@ -31,15 +43,17 @@ class CheckpointManager:
         if keep_all or len(self.best_model_metrics) < self.max_checkpoints:
             self._save(model, epoch, loss, loss_components)
             return
+        
+        selection_loss = _get_selection_loss(model, loss, loss_components)
 
         worst_idx = 0
         for i in range(1, len(self.best_model_metrics)):
             if _compare_model_performance(checkpoint_model=self.best_model_metrics[i], new_model=self.best_model_metrics[worst_idx]): # If true, worst_idx doesn't refer to worst model checkpoint
                 worst_idx = i
 
-        if _compare_model_performance(checkpoint_model=self.best_model_metrics[worst_idx], new_model=(loss, epoch)):
+        if _compare_model_performance(checkpoint_model=self.best_model_metrics[worst_idx], new_model=(selection_loss, epoch, (loss, loss_components))):
             deleted_model_metrics = self.best_model_metrics.pop(worst_idx) # Delete worst checkpoint
-            os.remove(self._path_for_epoch(deleted_model_metrics[-1]))
+            os.remove(self._path_for_epoch(deleted_model_metrics[1]))
             self._save(model, epoch, loss, loss_components) # Insert new checkpoint
 
 
@@ -50,7 +64,7 @@ class CheckpointManager:
             if _compare_model_performance(checkpoint_model=self.best_model_metrics[best_idx], new_model=self.best_model_metrics[i]): # If true, best_idx doesn't refer to best model checkpoint
                 best_idx = i
 
-        return self._path_for_epoch(self.best_model_metrics[best_idx][-1])
+        return self._path_for_epoch(self.best_model_metrics[best_idx][1])
     
 
     def save_final_checkpoint_stats(self):
@@ -71,8 +85,8 @@ class CheckpointManager:
 
             df = pd.concat([df, row], ignore_index=True)
         
-        df = df.sort_index(df.set_index("Epoch"))
-        df.to_csv(save_path, index=True)
+        df = df.sort_values("Epoch")
+        df.to_csv(save_path, index=False)
 
 
     def _path_for_epoch(self, epoch):
@@ -81,11 +95,7 @@ class CheckpointManager:
 
     def _save(self, model: TypedModel, epoch, loss, loss_components):
 
-        match model.model_type:
-            case ModelType.FullModel:
-                selection_loss = loss_components["Trajectory Loss"]
-            case ModelType.BounceModel:
-                selection_loss = loss
+        selection_loss = _get_selection_loss(model, loss, loss_components)
 
         self.best_model_metrics.append((selection_loss, epoch, (loss, loss_components)))
         torch.save(model.state_dict(), self._path_for_epoch(epoch))
@@ -152,4 +162,4 @@ class LossLog:
             "total_loss": self.total_loss,
             **self.loss_components
         }
-    
+

@@ -28,14 +28,14 @@ class FullLoss(nn.Module):
         self.eot_loss_fn = EOTLoss(eot_imbalance_weight)
         self.trajectory_loss_fn = TrajectoryLoss()
         self.below_ground_loss_fn = BelowGroundLoss()
-        if len(loss_weights) == 4:
-            self.height_loss_fn = HeightLoss()
+        self.height_loss_fn = HeightLoss()
 
     
-    def forward(self, coords, eps, target_coords, target_eps, lengths):
+    def forward(self, coords, eps, intermediate_heights, target_coords, target_eps, lengths):
         """
         - eps & target_eps are (N, L, 1)
         - coords & target_coords are (N, L, 3)
+        - intermediate_heights is (N, L, 1)
         - lengths is (N,)
         """
 
@@ -43,9 +43,8 @@ class FullLoss(nn.Module):
         trajectory_loss = self.trajectory_loss_fn(coords, target_coords, lengths)
         below_ground_loss = self.below_ground_loss_fn(coords)
 
-        pred_heights = coords[:, :, 1].unsqueeze(-1)
         target_heights = target_coords[:, :, 1].unsqueeze(-1)
-        height_loss = self.height_loss_fn(pred_heights, target_heights, lengths)
+        height_loss = self.height_loss_fn(intermediate_heights, target_heights, lengths)
 
         total_loss = (self.loss_weights[0] * eot_loss) + (self.loss_weights[1] * trajectory_loss) + (self.loss_weights[2] * below_ground_loss)
         loss_components = {"EOT Loss": eot_loss, "Trajectory Loss": trajectory_loss, "Below Ground Loss": below_ground_loss, "Height Loss (not used/included)": height_loss}

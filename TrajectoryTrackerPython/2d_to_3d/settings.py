@@ -37,8 +37,8 @@ class DataSplitMode(Enum):
 class SyntheticDataGeneration:
 
     # NUMBER OF TRAJECTORIES
-    num_camera_configs: int = 3
-    trajectories_per_config: int = 5
+    num_camera_configs: int = 100
+    trajectories_per_config: int = 50
 
     # PHYSICS GENERATION SETTINGS
     physics_rng: np.random.Generator = np.random.default_rng(seed=67)
@@ -106,8 +106,8 @@ class Training:
         max_epochs=1500,
         name="", # Temp value, passed in when script called
         resuming=False, # See comment for 'name'
-        eot_imbalance_weight=48.1026,
-        bounce_token_imbalance_weight = 38.8958,
+        eot_imbalance_weight=47.2332,
+        bounce_token_imbalance_weight = 38.8254,
         loss_component_weights=(10, 1, 10), # Used only when training full model; weights are for EOT Loss, Trajecory Loss, and Below-Ground Loss, respectively; append a number for Height Loss if want to enable it
         max_train_seconds=None, # See comment for 'name'
         max_checkpoints=None # See comment for 'name'

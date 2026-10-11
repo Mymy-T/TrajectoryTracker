@@ -167,7 +167,7 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
         final_coords = _mask(final_coords, mask)
         epsilons = _mask(epsilons, mask)
 
-        return final_coords, epsilons # (N, L, 3), (N, L, 1)
+        return final_coords, epsilons, heights # (N, L, 3), (N, L, 1), (N, L, 1)
 
     def estimate_height_from_diameters(self, c: torch.Tensor, d: torch.Tensor, diameters: torch.Tensor, intrinsics: torch.Tensor, lengths: torch.Tensor):
         """

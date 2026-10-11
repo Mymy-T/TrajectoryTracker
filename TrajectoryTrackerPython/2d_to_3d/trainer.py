@@ -23,6 +23,7 @@ def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose)
     resuming = train_config.resuming
     eot_imbalance_weight = train_config.eot_imbalance_weight
     bounce_token_imbalance_weight = train_config.bounce_token_imbalance_weight
+    loss_component_weights = train_config.loss_component_weights
     max_train_seconds = train_config.max_train_seconds
     max_checkpoints = train_config.max_checkpoints
     train_dataset = train_config.custom_train_dataset # Make a new ddataset based on current saved data if this is None
@@ -79,13 +80,12 @@ def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     if model.model_type == ModelType.FullModel: # TODO: Find imbalance weights for each individual classification loss
-        loss_fn = FullLoss(eot_imbalance_weight=eot_imbalance_weight)
-        loss_log = LossLog(0, {"EOT Loss": 0, "Trajectory Loss": 0, "Below Ground Loss": 0}) # Only used in _train_epoch
+        loss_fn = FullLoss(eot_imbalance_weight=eot_imbalance_weight, loss_weights=loss_component_weights)
 
     elif model.model_type == ModelType.BounceModel:
         loss_fn = BounceTokenLoss(imbalance_weight=bounce_token_imbalance_weight)
-        loss_log = LossLog(0, {}) # Only used in _train_epoch
 
+    loss_log = LossLog(0, {})
 
     # MARK: Training
     start_epoch = 1
@@ -111,9 +111,9 @@ def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose)
 
         # Reset back to initial state, resuming has been completed; everything should run normally again
         resume_batch_idx = 0
-        loss_log.total_loss = 0
+        loss_log.total_loss = 0.0
         for key in loss_log.loss_components.keys():
-            loss_log.loss_components[key] = 0
+            loss_log.loss_components[key] = 0.0
 
         if time_limit_reached:
             # Training is paused, not complete: skip validation, model selection, and finalization for this partial epoch; resume later using resume_checkpoint.pt
@@ -164,9 +164,6 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     num_batches = len(train_loader)
     time_limit_reached = False
 
-    total_loss = loss_log.total_loss
-    loss_components = loss_log.loss_components
-
     for idx, batch in enumerate(train_loader): # See return of collate_func in dataset.py to see batch contents
 
         if idx < resume_batch_idx:
@@ -177,8 +174,8 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         
         if model.model_type == ModelType.FullModel:
 
-            pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters, bounce_token_labels) # (N, L, 3), (N, L, 1); teacher forcing for bounce_tokens during training
-            loss, computed_loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
+            pred_coords, pred_eot, pred_intermediate_heights = model(inputs, lengths, intrinsics, extrinsics, diameters, bounce_token_labels) # (N, L, 3), (N, L, 1); teacher forcing for bounce_tokens during training
+            loss, computed_loss_components = loss_fn(pred_coords, pred_eot, pred_intermediate_heights, coord_labels, eot_labels, lengths)
 
         elif model.model_type == ModelType.BounceModel:
             
@@ -187,14 +184,13 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
 
         loss.backward()
 
-        total_loss += loss.item() # Aggregates losses for logging
+        loss_log.total_loss += loss.item() # Aggregates losses for logging
         for key, value in computed_loss_components.items():
-            loss_components[key] += value.item()
+            loss_log.loss_components[key] = loss_log.loss_components.get(key, 0.0) + value.item()
 
         optimizer.step()
         optimizer.zero_grad()
 
-        loss_log = LossLog(total_loss, loss_components)
         resume_manager.save(model, optimizer, epoch, idx + 1, loss_log, best_model_metrics) # Resume on next batch
 
         if max_train_seconds is not None and (time.monotonic() - training_start_time) >= max_train_seconds:
@@ -214,8 +210,8 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     if num_batches == 0:
         raise RuntimeError("There is no training data.")
     
-    avg_loss = total_loss / num_batches
-    avg_component_losses = {key: value / num_batches for key, value in loss_components.items()}
+    avg_loss = loss_log.total_loss / num_batches
+    avg_component_losses = {key: value / num_batches for key, value in loss_log.loss_components.items()}
 
 
     if not time_limit_reached:
@@ -246,8 +242,8 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
 
             if model.model_type == ModelType.FullModel:
 
-                pred_coords, pred_eot = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
-                loss, computed_loss_components = loss_fn(pred_coords, pred_eot, coord_labels, eot_labels, lengths)
+                pred_coords, pred_eot, pred_intermediate_heights = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
+                loss, computed_loss_components = loss_fn(pred_coords, pred_eot, pred_intermediate_heights, coord_labels, eot_labels, lengths)
 
             elif model.model_type == ModelType.BounceModel:
                 
