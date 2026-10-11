@@ -208,6 +208,7 @@ class TrainingConfig:
     resuming: bool
     eot_imbalance_weight: float
     bounce_token_imbalance_weight: float
+    loss_component_weights: tuple
     max_train_seconds: int | None
     max_checkpoints: int | None
     custom_train_dataset: Dataset | None = None # TODO: Deprecate this, data taken from specific project folders

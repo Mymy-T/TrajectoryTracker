@@ -15,21 +15,21 @@ def _build_length_mask(lengths, max_len):
 
 class FullLoss(nn.Module):
 
-    def __init__(self, eot_imbalance_weight, loss_weights=None):
+    def __init__(self, eot_imbalance_weight, loss_weights):
 
         super().__init__()
 
-        if loss_weights is None:
-            loss_weights = [10, 1, 10]
 
-        if len(loss_weights) != 3:
-            raise IndexError("loss_weights must have length 3.")
+        if len(loss_weights) not in [3, 4]:
+            raise IndexError("loss_weights must have either length 3 (no height loss) or length 4 (w/ height loss).")
 
         self.loss_weights = loss_weights
 
         self.eot_loss_fn = EOTLoss(eot_imbalance_weight)
         self.trajectory_loss_fn = TrajectoryLoss()
         self.below_ground_loss_fn = BelowGroundLoss()
+        if len(loss_weights) == 4:
+            self.height_loss_fn = HeightLoss()
 
     
     def forward(self, coords, eps, target_coords, target_eps, lengths):
@@ -43,9 +43,19 @@ class FullLoss(nn.Module):
         trajectory_loss = self.trajectory_loss_fn(coords, target_coords, lengths)
         below_ground_loss = self.below_ground_loss_fn(coords)
 
-        total_loss = (self.loss_weights[0] * eot_loss) + (self.loss_weights[1] * trajectory_loss) + (self.loss_weights[2] * below_ground_loss)
+        pred_heights = coords[:, :, 1].unsqueeze(-1)
+        target_heights = target_coords[:, :, 1].unsqueeze(-1)
+        height_loss = self.height_loss_fn(pred_heights, target_heights, lengths)
 
-        return total_loss, {"EOT Loss": eot_loss, "Trajectory Loss": trajectory_loss, "Below Ground Loss": below_ground_loss}
+        total_loss = (self.loss_weights[0] * eot_loss) + (self.loss_weights[1] * trajectory_loss) + (self.loss_weights[2] * below_ground_loss)
+        loss_components = {"EOT Loss": eot_loss, "Trajectory Loss": trajectory_loss, "Below Ground Loss": below_ground_loss, "Height Loss (not used/included)": height_loss}
+
+        if len(self.loss_weights) == 4:
+            total_loss += self.loss_weights[3] * height_loss
+            loss_components = {"EOT Loss": eot_loss, "Trajectory Loss": trajectory_loss, "Below Ground Loss": below_ground_loss, "Height Loss": height_loss}
+        
+
+        return total_loss, loss_components
 
 
 class EOTLoss(nn.Module):
@@ -89,6 +99,22 @@ class BounceTokenLoss(nn.Module):
         mask = _build_length_mask(lengths, pred.shape[1]) # (N, L)
         return bce[mask].sum() / mask.sum().clamp(min=1), {} # Extra dict represents loss components, which is empty in this case
     
+
+
+class HeightLoss(nn.Module): # A loss for the intermediate heights within the network
+
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, pred, target, lengths):
+        """
+        - pred & target are (N, L, 1)
+        - lengths is (N,)
+        """
+        sq_diffs = F.mse_loss(pred, target, reduction="none").squeeze(-1) # (N, L)
+        mask = _build_length_mask(lengths, sq_diffs.shape[1]) # (N, L)
+        mse = sq_diffs[mask].sum() / mask.sum().clamp(min=1)
+        return mse
 
 
 class TrajectoryLoss(nn.Module):

@@ -501,7 +501,7 @@ class HeightNetwork(nn.Module):
 
         w = torch.zeros((N, L), device=p.device, dtype=p.dtype) # Weight for h_b; weight for h_f is 1 - w
         w = torch.where(positions < starts, 1.0, w)
-        denom = (ends - starts).clamp(min=1) # In the case of one bounce
+        denom = (ends - starts).clamp(min=1)
         w = torch.where((starts <= positions) & (positions <= ends), (positions - starts) / denom, w)
         w = torch.where((ends < positions) & (positions < lens), 0.0, w)
         w = w.unsqueeze(-1) # (N, L, 1)

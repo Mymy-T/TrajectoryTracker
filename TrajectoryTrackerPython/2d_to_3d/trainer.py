@@ -124,7 +124,7 @@ def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose)
         valid_loss, valid_loss_components = evaluate(model, loss_fn, valid_dataloader, valid=True, verbose=verbose)
 
         # Selection of the saved best checkpoint models
-        checkpoint_manager.update(model, epoch, valid_loss)
+        checkpoint_manager.update(model, epoch, valid_loss, valid_loss_components)
 
         # Logging
         writer.add_scalars(main_tag="Total Loss", tag_scalar_dict={"Train": train_loss, "Valid": valid_loss}, global_step=epoch)
@@ -134,7 +134,7 @@ def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose)
         writer.flush()
 
     # MARK: Post Training
-
+    checkpoint_manager.save_final_checkpoint_stats() # csv file in the checkpoints folder
     best_model_path = checkpoint_manager.best_checkpoint_path()
 
     # Load the best model and save it for easy access

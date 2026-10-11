@@ -1,4 +1,6 @@
+from model import TypedModel, ModelType
 import os
+import pandas as pd
 import torch
 import settings
 
@@ -6,7 +8,7 @@ device = settings.device
 
 def _compare_model_performance(checkpoint_model: tuple, new_model: tuple):
     """
-    checkpoint_model, new_model - tuples of (loss, epoch)
+    checkpoint_model, new_model - tuples of (loss, epoch, full_loss)
     Returns True is new model is better, False otherwise
     """
     return new_model[0] < checkpoint_model[0]
@@ -17,17 +19,17 @@ class CheckpointManager:
     def __init__(self, checkpoints_folder, max_checkpoints, best_model_metrics=None):
         self.checkpoints_folder = checkpoints_folder
         self.max_checkpoints = max_checkpoints  # None means keep every checkpoint
-        self.best_model_metrics = best_model_metrics if best_model_metrics is not None else [] # List of (loss, epoch)
+        self.best_model_metrics = best_model_metrics if best_model_metrics is not None else [] # List of (loss, epoch, full_loss); loss is selection criteria, full_loss is tuple of (total loss, loss_components)
 
         if max_checkpoints is None:
             print(f"Keeping every checkpoint in {checkpoints_folder}")
 
 
-    def update(self, model, epoch, loss):
+    def update(self, model: TypedModel, epoch, loss, loss_components):
 
         keep_all = self.max_checkpoints is None
         if keep_all or len(self.best_model_metrics) < self.max_checkpoints:
-            self._save(model, epoch, loss)
+            self._save(model, epoch, loss, loss_components)
             return
 
         worst_idx = 0
@@ -38,7 +40,7 @@ class CheckpointManager:
         if _compare_model_performance(checkpoint_model=self.best_model_metrics[worst_idx], new_model=(loss, epoch)):
             deleted_model_metrics = self.best_model_metrics.pop(worst_idx) # Delete worst checkpoint
             os.remove(self._path_for_epoch(deleted_model_metrics[-1]))
-            self._save(model, epoch, loss) # Insert new checkpoint
+            self._save(model, epoch, loss, loss_components) # Insert new checkpoint
 
 
     def best_checkpoint_path(self):
@@ -49,14 +51,43 @@ class CheckpointManager:
                 best_idx = i
 
         return self._path_for_epoch(self.best_model_metrics[best_idx][-1])
+    
+
+    def save_final_checkpoint_stats(self):
+
+        save_path = os.path.join(self.checkpoints_folder, "checkpoint_stats.csv")
+        df = pd.DataFrame()
+
+        for model_metrics in self.best_model_metrics:
+            epoch = model_metrics[1]
+            total_loss = model_metrics[2][0]
+            loss_components = model_metrics[2][1]
+
+            row = pd.DataFrame([{
+                "Epoch": epoch,
+                "Total Loss": total_loss,
+                **loss_components
+            }])
+
+            df = pd.concat([df, row], ignore_index=True)
+        
+        df = df.sort_index(df.set_index("Epoch"))
+        df.to_csv(save_path, index=True)
 
 
     def _path_for_epoch(self, epoch):
         return os.path.join(self.checkpoints_folder, f"epoch_{epoch}.pt")
 
 
-    def _save(self, model, epoch, loss):
-        self.best_model_metrics.append((loss, epoch))
+    def _save(self, model: TypedModel, epoch, loss, loss_components):
+
+        match model.model_type:
+            case ModelType.FullModel:
+                selection_loss = loss_components["Trajectory Loss"]
+            case ModelType.BounceModel:
+                selection_loss = loss
+
+        self.best_model_metrics.append((selection_loss, epoch, (loss, loss_components)))
         torch.save(model.state_dict(), self._path_for_epoch(epoch))
 
 

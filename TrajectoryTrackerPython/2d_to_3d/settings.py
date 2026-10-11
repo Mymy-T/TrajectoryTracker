@@ -109,6 +109,7 @@ class Training:
         resuming=False, # Same as name
         eot_imbalance_weight=48.1026,
         bounce_token_imbalance_weight = 38.8958,
+        loss_component_weights=(10, 1, 10), # Used only when training full model; weights are for EOT Loss, Trajecory Loss, and Below-Ground Loss; append a number for Height Loss if want to enable it
         max_train_seconds=None, # Same as name
         max_checkpoints=None # Same as name
     ))
