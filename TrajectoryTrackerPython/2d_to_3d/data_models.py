@@ -187,7 +187,7 @@ class TrajectoryGenerationSettings:
     num_hits_range: tuple[int, int]
     hit_zone_bounds: tuple[float, float]
     min_hit_height_frac: float
-    delayed_hit_secs_after_bounce: int
+    delayed_hit_secs_after_bounce: float
     fh_dist: FHInitialDistributionParameters = field(default_factory=lambda: FHInitialDistributionParameters())
     bh_dist: BHInitialDistributionParameters = field(default_factory=lambda: BHInitialDistributionParameters())
 

@@ -36,28 +36,27 @@ class DataSplitMode(Enum):
 @dataclass(frozen=True)
 class SyntheticDataGeneration:
 
-    # UNIVERSAL RNG
-    rng: np.random.Generator = np.random.default_rng(seed=67)
-
     # NUMBER OF TRAJECTORIES
     num_camera_configs: int = 3
     trajectories_per_config: int = 5
 
     # PHYSICS GENERATION SETTINGS
+    physics_rng: np.random.Generator = np.random.default_rng(seed=67)
     trajectory_generation_settings: TrajectoryGenerationSettings = field(default_factory=lambda: TrajectoryGenerationSettings(
         simulation_timestep=0.001,
         mode=TrajectoryMode.BOUNCE_AND_HIT,
         spin_decay=False,
-        oob_buffer=3,
+        oob_buffer=4,
         max_bounces=4,
         bounce_trigger_cap=3,
-        num_hits_range=(4, 4),
+        num_hits_range=(3, 5),
         hit_zone_bounds=(7/16, 1/2),
         min_hit_height_frac=0.2,
-        delayed_hit_secs_after_bounce=0.4
+        delayed_hit_secs_after_bounce=0.3
     ))
 
     # PROJECTION/INTERPOLATION SETTINGS
+    camera_rng: np.random.Generator = np.random.default_rng(seed=100)
     camera_perspective_mode: CameraPerspectiveMode = CameraPerspectiveMode.BROADCAST
     camera_perspective_name: str = field(init=False)
     intrinsics_known: bool = field(init=False)
@@ -73,7 +72,7 @@ class SyntheticDataGeneration:
 
 
     # Data Splitting
-    split_seed: int = 67 # Separate seed involved in pandas df sampling
+    split_seed: int = 1 # Separate seed involved in pandas df sampling
     split_mode: DataSplitMode = DataSplitMode.camera_config_border
     train_prop: float = 0.7
     valid_prop: float = 0.15
@@ -102,16 +101,16 @@ class Model:
 @dataclass
 class Training:
     train_config: TrainingConfig = field(default_factory=lambda: TrainingConfig(
-        lr=1e-5,
-        batch_size=8,
-        max_epochs=10,
-        name="", # Temp, passed in when script called
-        resuming=False, # Same as name
+        lr=0.001,
+        batch_size=128,
+        max_epochs=1500,
+        name="", # Temp value, passed in when script called
+        resuming=False, # See comment for 'name'
         eot_imbalance_weight=48.1026,
         bounce_token_imbalance_weight = 38.8958,
-        loss_component_weights=(10, 1, 10), # Used only when training full model; weights are for EOT Loss, Trajecory Loss, and Below-Ground Loss; append a number for Height Loss if want to enable it
-        max_train_seconds=None, # Same as name
-        max_checkpoints=None # Same as name
+        loss_component_weights=(10, 1, 10), # Used only when training full model; weights are for EOT Loss, Trajecory Loss, and Below-Ground Loss, respectively; append a number for Height Loss if want to enable it
+        max_train_seconds=None, # See comment for 'name'
+        max_checkpoints=None # See comment for 'name'
     ))
     
 

@@ -25,7 +25,7 @@ def create_dataset():
     - Interpolaion from simulation timestep to target_fps timestep is done before projection/diameter generation
     """
     data_gen_settings = SyntheticDataGeneration()
-    rng = data_gen_settings.rng
+    rng = data_gen_settings.camera_rng
     base_intrinsics, base_extrinsics = proj.get_base_camera_config()
 
     paths = Paths()
@@ -33,6 +33,10 @@ def create_dataset():
     processed_data_folder = paths.processed_data_folder
 
     raw_df = pd.read_csv(os.path.join(raw_data_folder, "data.csv"))
+
+    expected_num_examples = data_gen_settings.num_camera_configs * data_gen_settings.trajectories_per_config
+    if len(raw_df) != expected_num_examples:
+        raise ValueError(f"There are {len(raw_df)} examples in raw_data/data.csv, but the settings expect {data_gen_settings.num_camera_configs} camera configs and {data_gen_settings.trajectories_per_config} examples per config for a total of {expected_num_examples} examples. Reconcile this first.")
 
     trajectories_3d_folder = os.path.join(processed_data_folder, "trajectories_3d")
     trajectories_2d_folder = os.path.join(processed_data_folder, "trajectories_2d")
@@ -49,12 +53,10 @@ def create_dataset():
     target_fps = data_gen_settings.target_fps
     new_timestep = 1 / target_fps
 
-    cam_config_settings = data_gen_settings.camera_config_sampling_settings
-
     rows = []
     for camera_config_id in tqdm(range(data_gen_settings.num_camera_configs), desc="Camera configs"):
 
-        intrinsics, extrinsics = proj.sample_camera_config(rng, base_intrinsics, base_extrinsics, sampling_settings=cam_config_settings)
+        intrinsics, extrinsics = proj.sample_camera_config(rng, base_intrinsics, base_extrinsics, sampling_settings=data_gen_settings.camera_config_sampling_settings)
         projection_matrix = proj.create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
 
         for trajectory_id in tqdm(range(data_gen_settings.trajectories_per_config), desc=f"Trajectories for camera config {camera_config_id}", leave=False):
@@ -65,8 +67,12 @@ def create_dataset():
             raw_eot = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_eot_path"]))
             raw_bounce_tokens = np.load(os.path.join(raw_data_folder, raw_row.loc["trajectory_bounce_tokens_path"]))
 
-            simulation_timestep = data_gen_settings.trajectory_generation_settings.simulation_timestep
-            trajectory, eot, bounce_tokens = interpolate_to_new_timestep(raw_trajectory, raw_eot, raw_bounce_tokens, simulation_timestep, new_timestep)
+            settings_simulation_timestep = data_gen_settings.trajectory_generation_settings.simulation_timestep
+            data_simulation_timestep = raw_row.loc["simulation_timestep"]
+            if settings_simulation_timestep != data_simulation_timestep:
+                raise ValueError(f"The simulation timesteps in settings and in raw_data/data.csv don't match ({settings_simulation_timestep}s in settings; {data_simulation_timestep}s in saved data). Reconcile them first.")
+            
+            trajectory, eot, bounce_tokens = interpolate_to_new_timestep(raw_trajectory, raw_eot, raw_bounce_tokens, settings_simulation_timestep, new_timestep)
             projected_trajectory = proj.project_trajectory_to_2d(trajectory, projection_matrix)
             diameters = proj.obtain_projected_diameters(trajectory, intrinsics, extrinsics)
 

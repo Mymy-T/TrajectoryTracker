@@ -14,7 +14,7 @@ class PhysicsSimulation():
     def __init__(self, initial_state: BallState, data_gen_settings: SyntheticDataGeneration):
 
         self.ball_state = copy.deepcopy(initial_state)
-        self.rng = data_gen_settings.rng
+        self.rng = data_gen_settings.physics_rng
         self.gen_settings = data_gen_settings.trajectory_generation_settings
 
         self.ball_properties = BallProperties()
@@ -419,7 +419,11 @@ class PhysicsSimulation():
         z_0 = hit_pos[2]
 
         denom = 2 * ( (y_0 / (x_t - x_0)) + ((y_0 - h) / x_0) )
-        v_x = target_sign * math.sqrt(g * x_t / denom) * 3/4 # Stay within the constraints for vx to hit the target AND pass the net height
+        radicand = g * x_t / denom
+        if radicand < 0:
+            v_x = target_sign * 20.0 # No constraint in this case, the ball is already above net
+        else:
+            v_x = target_sign * math.sqrt(g * x_t / denom) * 3/4 # Stay within the constraints for vx to hit the target AND pass the net height
         v_y = (g * (x_t - x_0) / (2 * v_x)) - (y_0 * v_x / (x_t - x_0))
         v_z = ((z_t - z_0) / (x_t - x_0)) * v_x
 
@@ -494,7 +498,7 @@ class PhysicsSimulation():
         Ball state is modified in place.
         """
         state = self.ball_state
-        dt = self.timestep
+        dt = self.gen_settings.simulation_timestep
 
         a, alpha = self._compute_accelerations(state.velocity, state.spin)
 
@@ -570,7 +574,7 @@ def generate_random_trajectory(data_gen_settings: SyntheticDataGeneration):
     - Defaults are centered around the same values used by generate_sample_trajectory
     - The same rng drives both the initial state sampling here and the in-rally racket hit sampling inside PhysicsSimulation (if racket_hits=True)
     """
-    rng = data_gen_settings.rng
+    rng = data_gen_settings.physics_rng
     gen_settings = data_gen_settings.trajectory_generation_settings
 
     shot_type = rng.choice(list(ShotType))
