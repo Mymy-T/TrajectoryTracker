@@ -202,7 +202,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         
 
         if verbose:
-            print(f"Epoch {epoch}; avg loss for batch {idx + 1}: {loss.item():.8f}")
+            print(f"Epoch {epoch}; avg loss for batch {idx + 1}: {loss.item():.8f}\tGradient Norm: {grad_norm:.4f}")
         
 
         if time_limit_reached:
