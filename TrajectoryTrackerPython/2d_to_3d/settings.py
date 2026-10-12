@@ -103,7 +103,7 @@ class Training:
     train_config: TrainingConfig = field(default_factory=lambda: TrainingConfig(
         lr=0.001,
         batch_size=128,
-        max_epochs=1500,
+        max_epochs=300,
         name="", # Temp value, passed in when script called
         resuming=False, # See comment for 'name'
         eot_imbalance_weight=47.2332,
@@ -113,5 +113,3 @@ class Training:
         max_checkpoints=None # See comment for 'name'
     ))
     
-
-

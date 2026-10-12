@@ -34,7 +34,7 @@ def train_and_evaluate(model: TypedModel, train_config: TrainingConfig, verbose)
     # MARK: Training Setup
     paths = Paths()
 
-    name += f"_{model.model_type.value}"
+    name += f"{model.model_type.value}"
 
     log_path = os.path.join(paths.logs_folder, name)
     model_save_folder = os.path.join(paths.model_saves_folder, name)
@@ -188,6 +188,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         for key, value in computed_loss_components.items():
             loss_log.loss_components[key] = loss_log.loss_components.get(key, 0.0) + value.item()
 
+        grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=30.0)
         optimizer.step()
         optimizer.zero_grad()
 

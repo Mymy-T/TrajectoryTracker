@@ -14,7 +14,7 @@ import warnings
 
 class ModelType(StrEnum):
     FullModel = ""
-    BounceModel = "bm"
+    BounceModel = "_bm"
 
 
 class TypedModel(Protocol):
@@ -133,23 +133,25 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
 
         c, d = obtain_ray_representation(x, intrinsics, extrinsics)
         p = obtain_intersection_representation(c, d) # (N, L, 4)
-        p = _mask(p, mask) # Zero out padded positions
 
         delta_p = torch.zeros_like(p)
         delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; (N, L, 4)
-        difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
-        delta_p = _mask(delta_p, difference_mask)
+        difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step); (N, L)
+        delta_p = _mask(delta_p, difference_mask) # Zero last true timestep
 
         if bounce_token_labels is None:
             bounce_input = delta_p # (N, L, 4)
-            bounce_tokens = self.bounce_network(bounce_input, lengths) # (N, L, 1)
+            bounce_logits = self.bounce_network(bounce_input, lengths) # (N, L, 1)
+            bounce_tokens = F.sigmoid(bounce_logits)
+            bounce_tokens = _mask(bounce_tokens, mask) # Prevent padded probs from ruining nms
         else: # Teacher forcing; used during training, as the bounce detection network is trained separately
             bounce_tokens = bounce_token_labels # (N, L, 1)
 
         bounce_positions = self.obtain_bounce_positions(bounce_tokens, lengths) # (N, L, 1)
 
         eot_input = delta_p # (N, L, 4)
-        epsilons = self.eot_network(eot_input, lengths) # (N, L, 1)
+        eot_logits = self.eot_network(eot_input, lengths) # (N, L, 1)
+        epsilons = F.sigmoid(eot_logits)
 
         if settings.estimate_height_from_diameter:
             boundary_heights = self.estimate_height_from_diameters(c, d, diameters, intrinsics, lengths) # (N, 2)
@@ -164,10 +166,9 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
         coord_deltas = self.refinement_network(refinement_input, lengths) # (N, L, 3)
 
         final_coords = coords + coord_deltas
-        final_coords = _mask(final_coords, mask)
-        epsilons = _mask(epsilons, mask)
 
-        return final_coords, epsilons, heights # (N, L, 3), (N, L, 1), (N, L, 1)
+        return final_coords, eot_logits, heights # (N, L, 3), (N, L, 1), (N, L, 1)
+
 
     def estimate_height_from_diameters(self, c: torch.Tensor, d: torch.Tensor, diameters: torch.Tensor, intrinsics: torch.Tensor, lengths: torch.Tensor):
         """
@@ -212,8 +213,7 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
 
     def obtain_bounce_positions(self, bounce_tokens: torch.Tensor, lengths: torch.Tensor):
         """
-        Essentially non-maximum suppression
-
+        Essentially non-maximum suppression for bounces
         - bounce_tokens is (N, L, 1)
         - Returns bounce_positions, which is (N, L, 1)
         """
@@ -223,9 +223,8 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
         min_threshold = self.model_settings.bounce_token_min_prob
         bounce_tokens = bounce_tokens.squeeze(-1) # (N, L)
         local_maxes  = F.max_pool1d(bounce_tokens.unsqueeze(1), kernel_size=2*nms_radius+1, stride=1, padding=nms_radius).squeeze(1) # max_pool1d requires channel dim; (N, L)
-        bounce_positions = ((bounce_tokens >= local_maxes) & (bounce_tokens > min_threshold)) # (N, L)
-        padding_mask = _build_validity_mask(lengths, L)
-        bounce_positions = _mask(bounce_positions.unsqueeze(-1), padding_mask).float() # (N, L, 1)
+        bounce_positions = ((bounce_tokens >= local_maxes) & (bounce_tokens >= min_threshold)) # (N, L)
+        bounce_positions = bounce_positions.unsqueeze(-1).float() # (N, L, 1)
 
         return bounce_positions # (N, L, 1)
 
@@ -261,23 +260,23 @@ class FullBounceNetwork(nn.Module, TypedModel):
     # Forward keeps same signiture as the full network
     def forward(self, x, lengths, intrinsics: torch.Tensor, extrinsics: torch.Tensor):
         """
-        See TrajectoryReconstructionNetwork for docs on params
+        - See TrajectoryReconstructionNetwork for docs on params
+        - Returns logits, not probabilities; use sigmoid to transform them into probs
         """
         lengths = lengths.to(x.device)
         L = x.shape[1]
-        mask = _build_validity_mask(lengths, L) # (N, L)
 
         c, d = obtain_ray_representation(x, intrinsics, extrinsics)
         p = obtain_intersection_representation(c, d) # (N, L, 4)
-        p = _mask(p, mask) # Zero out padded positions
 
         delta_p = torch.zeros_like(p)
         delta_p[:, :-1] = p[:, 1:] - p[:, :-1] # Differencing; (N, L, 4)
-        difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step)
-        delta_p = _mask(delta_p, difference_mask)
+        difference_mask = _build_validity_mask(lengths, L, remove_last_step=True) # Zero every padded position and each sequence's own last real step (no P_t+1 for last step); (N, L)
+        delta_p = _mask(delta_p, difference_mask) # Zero last true timestep
 
-        bounce_tokens = self.bounce_network(delta_p, lengths) # (N, L, 1)
-        return bounce_tokens
+        bounce_logits = self.bounce_network(delta_p, lengths) # (N, L, 1)
+        
+        return bounce_logits
 
 
 
@@ -303,8 +302,7 @@ class BounceNetwork(nn.Module): # Trained separately, since it's output isn't fe
             nn.LeakyReLU(negative_slope=0.01),
             fc_2,
             nn.LeakyReLU(negative_slope=0.01),
-            fc_3,
-            nn.Sigmoid()
+            fc_3
         )
 
     def forward(self, x, lengths): # x is (N, L, 4); lengths is (N,)
@@ -312,16 +310,17 @@ class BounceNetwork(nn.Module): # Trained separately, since it's output isn't fe
         lstm_out_1 = _run_lstm_with_packing(self.lstm_1, lstm_out_0, lengths) # (N, L, 128)
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
-        bounce_tokens = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        bounce_tokens = _mask(bounce_tokens, _build_validity_mask(lengths, x.shape[1]))
+        bounce_logits = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
 
-        return bounce_tokens  # (N, L, 1)
+        return bounce_logits  # (N, L, 1)
 
 
 
 # MARK: EOT Network
 class EOTNetwork(nn.Module):
-
+    """
+    - Returns logits, not probs
+    """
     def __init__(self):
         super().__init__()
 
@@ -341,8 +340,7 @@ class EOTNetwork(nn.Module):
             nn.LeakyReLU(negative_slope=0.01),
             fc_2,
             nn.LeakyReLU(negative_slope=0.01),
-            fc_3,
-            nn.Sigmoid()
+            fc_3
         )
 
     def forward(self, x, lengths): # x is (N, L, 4); lengths is (N,)
@@ -350,10 +348,9 @@ class EOTNetwork(nn.Module):
         lstm_out_1 = _run_lstm_with_packing(self.lstm_1, lstm_out_0, lengths) # (N, L, 128)
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
-        epsilons = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        epsilons = _mask(epsilons, _build_validity_mask(lengths, x.shape[1]))
+        logits = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
 
-        return epsilons  # (N, L, 1)
+        return logits  # (N, L, 1)
 
 
 # MARK: Height Delta LSTM
@@ -449,7 +446,6 @@ class HeightLSTM(nn.Module):
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         h_refined = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 1); add residual from lstm_0
-        h_refined = _mask(h_refined, _build_validity_mask(lengths, x.shape[1]))
 
         return h_refined  # (N, L, 1)
 
@@ -544,7 +540,6 @@ class RefinementNetwork(nn.Module):
         lstm_out_2 = _run_lstm_with_packing(self.lstm_2, lstm_out_1, lengths) # (N, L, 128)
 
         position_deltas = self.fc_network(lstm_out_0 + lstm_out_2) # (N, L, 3); add residual from lstm_0
-        position_deltas = _mask(position_deltas, _build_validity_mask(lengths, x.shape[1]))
 
         return position_deltas  # (N, L, 3)
 

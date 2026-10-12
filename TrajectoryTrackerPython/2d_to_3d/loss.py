@@ -41,7 +41,7 @@ class FullLoss(nn.Module):
 
         eot_loss = self.eot_loss_fn(eps, target_eps, lengths)
         trajectory_loss = self.trajectory_loss_fn(coords, target_coords, lengths)
-        below_ground_loss = self.below_ground_loss_fn(coords)
+        below_ground_loss = self.below_ground_loss_fn(coords, lengths)
 
         target_heights = target_coords[:, :, 1].unsqueeze(-1)
         height_loss = self.height_loss_fn(intermediate_heights, target_heights, lengths)
@@ -72,8 +72,8 @@ class EOTLoss(nn.Module):
         """
         pred = pred.squeeze(-1) # (N, L)
         target = target.squeeze(-1) # (N, L)
-        weight = torch.where(target == 1, self.imbalance_weight, 1.0) # Per-element weight for positive (EOT) class
-        bce = F.binary_cross_entropy(pred, target, weight=weight, reduction="none") # (N, L)
+        pos_weight = torch.tensor(self.imbalance_weight, device=pred.device, dtype=pred.dtype)
+        bce = F.binary_cross_entropy_with_logits(pred, target, pos_weight=pos_weight, reduction="none") # (N, L)
         mask = _build_length_mask(lengths, pred.shape[1]) # (N, L)
         return bce[mask].sum() / mask.sum().clamp(min=1)
     
@@ -93,8 +93,8 @@ class BounceTokenLoss(nn.Module):
         """
         pred = pred.squeeze(-1) # (N, L)
         target = target.squeeze(-1) # (N, L)
-        weight = torch.where(target == 1, self.imbalance_weight, 1.0) # Per-element weight for positive (EOT) class
-        bce = F.binary_cross_entropy(pred, target, weight=weight, reduction="none") # (N, L)
+        pos_weight = torch.tensor(self.imbalance_weight, device=pred.device, dtype=pred.dtype)
+        bce = F.binary_cross_entropy_with_logits(pred, target, pos_weight=pos_weight, reduction="none") # (N, L)
         mask = _build_length_mask(lengths, pred.shape[1]) # (N, L)
         return bce[mask].sum() / mask.sum().clamp(min=1), {} # Extra dict represents loss components, which is empty in this case
     
@@ -139,17 +139,20 @@ class BelowGroundLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def forward(self, pred):
+    def forward(self, preds, lengths):
         """
         - pred is (N, L, 3)
         """
-        y_coords = pred[:, :, 1]
-        y_coords = torch.where(y_coords >= 0, 0, y_coords)**2
-        num_negative_y = (y_coords != 0).sum().item()
+        y_coords = preds[:, :, 1]
+        y_coords_copy = y_coords.clone()
+        valid = _build_length_mask(lengths, y_coords.shape[1])
+        y_coords_copy[~valid] = 0
+        y_coords_copy = torch.where(y_coords_copy >= 0, 0, y_coords_copy)**2
+        num_negative_y = (y_coords_copy != 0).sum().item()
 
         if num_negative_y == 0:
-            return torch.zeros((), device=pred.device, dtype=pred.dtype)
+            return torch.zeros((), device=preds.device, dtype=preds.dtype)
 
-        error = y_coords.sum() / num_negative_y
+        error = y_coords_copy.sum() / num_negative_y
 
         return error
