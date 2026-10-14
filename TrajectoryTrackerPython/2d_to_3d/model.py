@@ -129,7 +129,6 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
         """
         lengths = lengths.to(x.device)
         L = x.shape[1]
-        mask = _build_validity_mask(lengths, L) # (N, L)
 
         c, d = obtain_ray_representation(x, intrinsics, extrinsics)
         p = obtain_intersection_representation(c, d) # (N, L, 4)
@@ -143,11 +142,10 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
             bounce_input = delta_p # (N, L, 4)
             bounce_logits = self.bounce_network(bounce_input, lengths) # (N, L, 1)
             bounce_tokens = F.sigmoid(bounce_logits)
-            bounce_tokens = _mask(bounce_tokens, mask) # Prevent padded probs from ruining nms
         else: # Teacher forcing; used during training, as the bounce detection network is trained separately
             bounce_tokens = bounce_token_labels # (N, L, 1)
 
-        bounce_positions = self.obtain_bounce_positions(bounce_tokens, lengths) # (N, L, 1)
+        bounce_positions = obtain_bounce_positions(bounce_tokens, lengths, self.model_settings.bounce_token_min_prob, self.model_settings.bounce_token_nms_radius) # (N, L, 1)
 
         eot_input = delta_p # (N, L, 4)
         eot_logits = self.eot_network(eot_input, lengths) # (N, L, 1)
@@ -210,25 +208,6 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
 
         return h # (N, 2)
     
-
-    def obtain_bounce_positions(self, bounce_tokens: torch.Tensor, lengths: torch.Tensor):
-        """
-        Essentially non-maximum suppression for bounces
-        - bounce_tokens is (N, L, 1)
-        - Returns bounce_positions, which is (N, L, 1)
-        """
-        N = bounce_tokens.shape[0]
-        L = bounce_tokens.shape[1]
-        nms_radius = self.model_settings.bounce_token_nms_radius
-        min_threshold = self.model_settings.bounce_token_min_prob
-        bounce_tokens = bounce_tokens.squeeze(-1) # (N, L)
-        local_maxes  = F.max_pool1d(bounce_tokens.unsqueeze(1), kernel_size=2*nms_radius+1, stride=1, padding=nms_radius).squeeze(1) # max_pool1d requires channel dim; (N, L)
-        bounce_positions = ((bounce_tokens >= local_maxes) & (bounce_tokens >= min_threshold)) # (N, L)
-        bounce_positions = bounce_positions.unsqueeze(-1).float() # (N, L, 1)
-
-        return bounce_positions # (N, L, 1)
-
-
 
     def obtain_coords_from_height(self, c: torch.Tensor, d: torch.Tensor, h: torch.Tensor):
         """
@@ -602,3 +581,21 @@ def obtain_intersection_representation(c: torch.Tensor, d: torch.Tensor):
     pv_z = c_z - c_x * _safe_divide(d_z, d_x) # (N, L)
 
     return torch.stack((pg_x, pg_z, pv_y, pv_z), dim=-1) # (N, L, 4)
+
+
+def obtain_bounce_positions(bounce_tokens: torch.Tensor, lengths, min_threshold, nms_radius):
+    """
+    Essentially non-maximum suppression for bounces
+    - bounce_tokens is (N, L, 1)
+    - Returns bounce_positions, which is (N, L, 1); bounces are marked with 1, non-bounce with 0
+    """
+    L = bounce_tokens.shape[1]
+    mask = _build_validity_mask(lengths, L) # (N, L)
+    masked_bounce_tokens = _mask(bounce_tokens, mask) # Prevent padded probs from ruining nms
+
+    masked_bounce_tokens = masked_bounce_tokens.squeeze(-1) # (N, L)
+    local_maxes  = F.max_pool1d(masked_bounce_tokens.unsqueeze(1), kernel_size=2*nms_radius+1, stride=1, padding=nms_radius).squeeze(1) # max_pool1d requires channel dim; (N, L)
+    bounce_positions = ((masked_bounce_tokens >= local_maxes) & (masked_bounce_tokens >= min_threshold)) # (N, L)
+    bounce_positions = bounce_positions.unsqueeze(-1).float() # (N, L, 1)
+
+    return bounce_positions # (N, L, 1)

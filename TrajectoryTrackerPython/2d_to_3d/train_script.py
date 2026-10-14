@@ -1,8 +1,7 @@
 import argparse
 from model import TrajectoryReconstructionNetwork, FullBounceNetwork
-from trainer import train_and_evaluate
 import settings
-
+from trainer import train_and_evaluate
 def main():
 
     parser = argparse.ArgumentParser(description="Start/resume training a model.")

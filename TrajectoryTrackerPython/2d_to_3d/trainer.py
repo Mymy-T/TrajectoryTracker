@@ -2,11 +2,12 @@ from checkpointing import CheckpointManager, ResumeCheckpointManager, LossLog
 from data_models import TrainingConfig
 from dataset import TrajectoryReconstructionDataset, DatasetType, collate_func
 from loss import FullLoss, BounceTokenLoss
-from model import ModelType, TypedModel
+from model import FullBounceNetwork, ModelType, TypedModel, obtain_bounce_positions, _build_validity_mask, _mask
 import os
 from paths import Paths
 import time
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 import settings
@@ -179,8 +180,8 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
 
         elif model.model_type == ModelType.BounceModel:
             
-            pred_bounce_tokens = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
-            loss, computed_loss_components = loss_fn(pred_bounce_tokens, bounce_token_labels, lengths)
+            pred_bounce_logits = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
+            loss, computed_loss_components = loss_fn(pred_bounce_logits, bounce_token_labels, lengths)
 
         loss.backward()
 
@@ -237,7 +238,7 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
         total_loss = 0
         loss_components = {}
 
-        for idx, batch in enumerate(data_loader): # Batch is (inputs, coord_labels, eot_labels, lengths)
+        for idx, batch in enumerate(data_loader): # See return of collate_func in dataset.py to see batch contents
 
             inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
 
@@ -248,8 +249,8 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
 
             elif model.model_type == ModelType.BounceModel:
                 
-                pred_bounce_tokens = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
-                loss, computed_loss_components = loss_fn(pred_bounce_tokens, bounce_token_labels, lengths)
+                pred_bounce_logits = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
+                loss, computed_loss_components = loss_fn(pred_bounce_logits, bounce_token_labels, lengths)
 
             total_loss += loss.item()
             for key, value in computed_loss_components.items():
@@ -278,8 +279,54 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
         return avg_loss, avg_component_losses
 
 
-def _compute_classification_metrics(model, data_loader):
-    pass # TODO: Potentially add precision, recall, F1, accuracy
+def compute_classification_metrics(model: FullBounceNetwork, data_loader, pred_offset_buffer):
+    """
+    - Compute accuracy, precision, recall, & F1 for bounce model
+    - pred_offset_buffer determines the max number of frames a prediction is off by before it gets counted wrong (|dist of pred frame - actual pred frame| <= buffer)
+    """
+    tp_tot = 0
+    tn_tot = 0
+    fp_tot = 0
+    fn_tot = 0
+
+    threshold = settings.Model().bounce_token_min_prob
+    nms_radius = settings.Model().bounce_token_nms_radius
+
+    model.eval()
+
+    with torch.inference_mode():
+
+        for idx, batch in enumerate(data_loader): # See return of collate_func in dataset.py to see batch contents
+
+            inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
+                
+            pred_bounce_logits = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
+            pred_bounce_tokens = F.sigmoid(pred_bounce_logits) # (N, L, 1)
+
+            bounce_positions = obtain_bounce_positions(pred_bounce_tokens, lengths, threshold, nms_radius) # (N, L, 1)
+            lenient_preds = F.max_pool1d(bounce_positions.squeeze(-1).unsqueeze(1), kernel_size=2*pred_offset_buffer+1, stride=1, padding=pred_offset_buffer).squeeze(1) # max_pool1d requires channel dim; (N, L)
+            lenient_preds = lenient_preds.unsqueeze(-1) # (N, L, 1)
+            lenient_labels = F.max_pool1d(bounce_token_labels.squeeze(-1).unsqueeze(1), kernel_size=2*pred_offset_buffer+1, stride=1, padding=pred_offset_buffer).squeeze(1) # max_pool1d requires channel dim; (N, L)
+            lenient_labels = lenient_labels.unsqueeze(-1) # (N, L, 1)
+
+            L = bounce_positions.shape[1]
+
+            tp = torch.sum((bounce_positions == 1) & (lenient_labels == 1))
+            tn = torch.sum(_mask((bounce_positions == 0) & (bounce_token_labels == 0), _build_validity_mask(lengths, L)))
+            fp = torch.sum((bounce_positions == 1) & (lenient_labels == 0))
+            fn = torch.sum((lenient_preds == 0) & (bounce_token_labels == 1))
+
+            tp_tot += tp.item()
+            tn_tot += tn.item()
+            fp_tot += fp.item()
+            fn_tot += fn.item()
+    
+    accuracy = (tp_tot + tn_tot) / (tp_tot + tn_tot + fp_tot + fn_tot)
+    precision = tp_tot / (tp_tot + fp_tot)
+    recall = tp_tot / (tp_tot + fn_tot)
+    f1 = 2 * (precision * recall) / (precision + recall)
+
+    return accuracy, precision, recall, f1
 
 
 def _read_batch(batch):
