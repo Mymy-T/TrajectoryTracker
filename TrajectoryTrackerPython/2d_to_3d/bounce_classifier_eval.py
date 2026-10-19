@@ -11,7 +11,7 @@ from trainer import compute_classification_metrics
 def main():
     parser = argparse.ArgumentParser(description="Evaluate the classification metrics of a bounce model.")
     parser.add_argument("--name", required=True, help="The name of the model. This should be a simple string, without extensions. Do NOT add _bm at the end, it will be added automatically.")
-    parser.add_argument("--buffer", required=True, type=int, help="The buffer where a model prediction is still considered to be the same as a label and counted right.")
+    parser.add_argument("--buffer", default=1, type=int, help="The buffer where a model prediction is still considered to be the same as a label and counted right.")
     
     args = parser.parse_args()
 

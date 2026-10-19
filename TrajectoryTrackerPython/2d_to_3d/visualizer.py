@@ -164,7 +164,7 @@ def _plot_fading_line_3d(ax, plot_x, plot_y, plot_z, fade_window, label=None, co
     ax.add_collection3d(Line3DCollection(segments, colors=colors, linewidth=2, label=label))
 
 
-def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
+def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None, color="b", label="3D Trajectory", hide_legend=False):
     """
     If ax is None, creates a new figure/3D axes and calls plt.show() at the end (standalone use);
     else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
@@ -252,7 +252,7 @@ def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
     if fade_window is not None and len(x) > 1:
         _plot_fading_line_3d(ax, x, z, y, fade_window, label="3D Trajectory")
     else:
-        ax.plot(x, z, y, label="3D Trajectory", color="b", linewidth=2)
+        ax.plot(x, z, y, label="3D Trajectory", color=color, linewidth=2)
 
     # Highlight start and end points
     ax.scatter(x[0], z[0], y[0], color="green", s=50, label="Start")
@@ -270,7 +270,8 @@ def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
 
     ax.set_xlim([-l/2 - 1, l/2 + 1])
     ax.set_ylim([-w/2 - 1, w/2 + 1])
-    ax.invert_yaxis() # This way negative values of z axis are towards the left
+    if not ax.yaxis.get_inverted():
+        ax.invert_yaxis() # This way negative values of z axis are towards the left
     ax.set_zlim([0, 4])
     ax.set_box_aspect([l, w, 4])
 
@@ -278,9 +279,11 @@ def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None):
     ax.set_xlabel("X Axis")
     ax.set_ylabel("Z Axis")
     ax.set_zlabel("Y Axis")
-    ax.set_title("3D Path Trajectory")
+    ax.set_title(label)
     ax.grid(False)
-    ax.legend()
+
+    if not hide_legend:
+        ax.legend()
 
     if standalone:
         plt.show()

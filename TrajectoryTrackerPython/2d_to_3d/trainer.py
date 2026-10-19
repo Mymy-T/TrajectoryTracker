@@ -170,7 +170,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
         if idx < resume_batch_idx:
             continue
         
-        inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
+        inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = read_batch(batch)
 
         
         if model.model_type == ModelType.FullModel:
@@ -240,7 +240,7 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
 
         for idx, batch in enumerate(data_loader): # See return of collate_func in dataset.py to see batch contents
 
-            inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
+            inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = read_batch(batch)
 
             if model.model_type == ModelType.FullModel:
 
@@ -298,7 +298,7 @@ def compute_classification_metrics(model: FullBounceNetwork, data_loader, pred_o
 
         for idx, batch in enumerate(data_loader): # See return of collate_func in dataset.py to see batch contents
 
-            inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = _read_batch(batch)
+            inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics, extrinsics, diameters = read_batch(batch)
                 
             pred_bounce_logits = model(inputs, lengths, intrinsics, extrinsics) # (N, L, 1)
             pred_bounce_tokens = F.sigmoid(pred_bounce_logits) # (N, L, 1)
@@ -329,7 +329,7 @@ def compute_classification_metrics(model: FullBounceNetwork, data_loader, pred_o
     return accuracy, precision, recall, f1
 
 
-def _read_batch(batch):
+def read_batch(batch):
     inputs = batch[0].to(device) # (N, L, 2)
     coord_labels = batch[1].to(device) # (N, L, 3)
     eot_labels = batch[2].to(device) # (N, L, 1)
