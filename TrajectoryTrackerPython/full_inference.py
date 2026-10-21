@@ -10,6 +10,7 @@ import os
 import pandas as pd
 import torch
 
+# python3 full_inference.py --dm pretrained_model --fm first_trial
 
 def main():
 
@@ -61,6 +62,7 @@ def run_inference(args, inference_base_folder):
         ball_points_df.loc[i, "d"] = 2 * tracked_ball_points[i][2] # diameter
 
     ball_points_df = ball_points_df.iloc[2:] # Drop first 2 frames since tracknet requires 3 consecutive frame inputs
+    ball_points_df = remove_input_outliers(ball_points_df)
     ball_points_df = ball_points_df.interpolate(method="linear", axis=0) # TODO: Maybe use better method
 
     ball_points = torch.tensor(ball_points_df.values, dtype=torch.float32)
@@ -107,6 +109,24 @@ def create_inference_example(trajectory_2d: torch.Tensor, intrinsics: torch.Tens
 
     batch = (inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics.unsqueeze(0), extrinsics.unsqueeze(0), diameters)
     return batch
+
+
+def remove_input_outliers(ball_points_df: pd.DataFrame, threshold_px=100):
+    """
+    Replaces input coords that are more than threshold_px away from neighbor midpoint w/ NaN
+    """
+    ball_points_df = ball_points_df.copy()
+
+    while True:
+        midpoints = (ball_points_df.shift(1) + ball_points_df.shift(-1)) / 2
+        deviations = np.sqrt((ball_points_df["x"] - midpoints["x"])**2 + (ball_points_df["y"] - midpoints["y"])**2)
+
+        if not deviations.max() > threshold_px: # No more outliers
+            break
+
+        ball_points_df.iloc[deviations.argmax()] = np.nan
+
+    return ball_points_df
 
 
 if __name__ == "__main__":
