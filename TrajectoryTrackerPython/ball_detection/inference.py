@@ -1,14 +1,14 @@
 import argparse
+from ball_detection.frame_extractor import extract_clip_frames
+from ball_detection.model import TrackNet
+from ball_detection.paths import ProjectPaths
+from ball_detection import settings
 import cv2
-from frame_extractor import extract_clip_frames
 import os
-from model import TrackNet
 import numpy as np
-from paths import ProjectPaths
 import textwrap
 import torch
 from tqdm import trange
-import settings
 
 # TODO: Create an mp4 video of the heatmaps too (before threshold is applied)
 
@@ -33,7 +33,7 @@ def main():
     frames_folder = os.path.join(inference_video_folder, "frames")
 
     if not os.path.exists(inference_video_folder):
-            os.mkdir(inference_video_folder)
+        os.mkdir(inference_video_folder)
 
     if not os.path.exists(frames_folder):
         os.mkdir(frames_folder)

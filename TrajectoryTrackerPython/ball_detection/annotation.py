@@ -1,6 +1,6 @@
+from ball_detection.paths import ProjectPaths
 import json
 import os
-from paths import ProjectPaths
 import shutil
 import subprocess
 import sys

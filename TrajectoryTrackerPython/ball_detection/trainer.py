@@ -1,16 +1,16 @@
-from checkpointing import CheckpointManager, ResumeCheckpointManager
-from dataset import TrackNetDataset, DatasetType
+from ball_detection.checkpointing import CheckpointManager, ResumeCheckpointManager
+from ball_detection.dataset import TrackNetDataset, DatasetType
+from ball_detection.paths import ProjectPaths
+from ball_detection import settings
 from enum import Enum
 import math
 import os
-from paths import ProjectPaths
 import time
 import torch
 from torch.utils.data import DataLoader, RandomSampler
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import torch.nn.functional as F
-import settings
 
 # TODO: Log hyperparam tuning results to a csv file for easy access, probably within paths.hyperparam_tuning_training_logs
 

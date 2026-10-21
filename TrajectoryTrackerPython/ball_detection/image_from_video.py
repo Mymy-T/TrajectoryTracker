@@ -1,6 +1,6 @@
+from ball_detection.paths import ProjectPaths
 import cv2
 import os
-from paths import ProjectPaths
 import sys
 
 

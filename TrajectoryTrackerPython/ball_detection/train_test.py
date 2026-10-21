@@ -2,10 +2,10 @@ import random
 
 from torch.utils.data import DataLoader, Subset
 
-from dataset import DatasetType, TrackNetDataset
-from model import TrackNet
-import trainer
-import settings
+from ball_detection.dataset import DatasetType, TrackNetDataset
+from ball_detection.model import TrackNet
+from ball_detection import settings
+from ball_detection import trainer
 
 device = settings.device
 

@@ -1,9 +1,9 @@
+from ball_detection.paths import ProjectPaths
 import cv2
 from enum import Enum
 import numpy as np
 import os
 import pandas as pd
-from paths import ProjectPaths
 from torch.utils.data import Dataset
 
 class DatasetType(Enum):

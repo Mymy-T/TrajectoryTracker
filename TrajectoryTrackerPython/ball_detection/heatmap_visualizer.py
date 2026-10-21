@@ -1,7 +1,7 @@
+from ball_detection.paths import ProjectPaths
 import cv2
 import matplotlib.pyplot as plt
 import os
-from paths import ProjectPaths
 
 paths = ProjectPaths()
 heatmap = cv2.imread(os.path.join(paths.processed_data_folder, "clip_0001", "heatmaps", "frame_0005_heatmap.png"), cv2.IMREAD_GRAYSCALE)

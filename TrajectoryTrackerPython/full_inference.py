@@ -3,8 +3,9 @@
 import argparse
 from ball_detection.frame_extractor import extract_clip_frames
 from ball_detection.inference import create_annotated_video, create_heatmap_video, obtain_tracked_ball_data
-from convert_2d_to_3d.inference import run_model
+from convert_2d_to_3d.inference import run_model, plot
 from convert_2d_to_3d.projector import obtain_base_intrinsics, obtain_base_extrinsics
+import numpy as np
 import os
 import pandas as pd
 import torch
@@ -21,25 +22,31 @@ def main():
     inference_base_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "full_inference_results")
     if not os.path.exists(inference_base_folder):
         os.mkdir(inference_base_folder)
-    
+
+    pred_coords, pred_eot, frame_indices = run_inference(args, inference_base_folder)
+    save_trajectory_3d(pred_coords, pred_eot, frame_indices, inference_base_folder)
+    plot(pred_coords, pred_eot)
+
+
+def run_inference(args, inference_base_folder):
     frames_folder = os.path.join(inference_base_folder, "frames")
     if not os.path.exists(frames_folder):
         os.mkdir(frames_folder)
-    
+
     video_path = os.path.join(inference_base_folder, f"{args.video}.mp4")
     if not os.path.exists(video_path):
         raise FileNotFoundError("Couldn't find video path within full_inference_results.")
-    
+
     intrinsics_path = os.path.join(inference_base_folder, f"intrinsics.json")
     if not os.path.exists(intrinsics_path):
         raise FileNotFoundError("Couldn't find intrinsics path within full_inference_results.")
-    
+
     extrinsics_path = os.path.join(inference_base_folder, f"extrinsics.npy")
     if not os.path.exists(extrinsics_path):
         raise FileNotFoundError("Couldn't find extrinsics path within full_inference_results.")
-    
+
     extract_clip_frames(video_path=video_path, output_dir=frames_folder)
-    tracked_ball_points = obtain_tracked_ball_data(inference_video_folder=frames_folder, model_name=args.dm) # Dict of {frame_idx: [x, y, r]}
+    tracked_ball_points = obtain_tracked_ball_data(inference_video_folder=inference_base_folder, model_name=args.dm) # Dict of {frame_idx: [x, y, r]}
     create_heatmap_video(inference_video_folder=inference_base_folder)
     create_annotated_video(inference_video_folder=inference_base_folder, tracked_ball_points=tracked_ball_points)
 
@@ -52,17 +59,30 @@ def main():
         ball_points_df.loc[i, "x"] = tracked_ball_points[i][0] # x
         ball_points_df.loc[i, "y"] = tracked_ball_points[i][1] # y
         ball_points_df.loc[i, "d"] = 2 * tracked_ball_points[i][2] # diameter
-    
+
+    ball_points_df = ball_points_df.iloc[2:] # Drop first 2 frames since tracknet requires 3 consecutive frame inputs
     ball_points_df = ball_points_df.interpolate(method="linear", axis=0) # TODO: Maybe use better method
 
-    ball_points = torch.tensor(ball_points_df.values)
+    ball_points = torch.tensor(ball_points_df.values, dtype=torch.float32)
     intrinsics = torch.tensor(obtain_base_intrinsics(intrinsics_path), dtype=torch.float32)
     extrinsics = torch.tensor(obtain_base_extrinsics(extrinsics_path), dtype=torch.float32)
 
     batch = create_inference_example(ball_points, intrinsics, extrinsics)
-    run_model(args.fm, inference_example=batch)
+    pred_coords, pred_eot, _, _ = run_model(args.fm, inference_example=batch)
+
+    frame_indices = ball_points_df.index.to_numpy()
+
+    return pred_coords, pred_eot, frame_indices
 
 
+def save_trajectory_3d(pred_coords: np.ndarray, pred_eot: np.ndarray, frame_indices: np.ndarray, inference_base_folder):
+    """
+    - pred_coords is (L, 3)
+    - pred_eot is (L,)
+    - frame_indices is (L,)
+    """
+    save_path = os.path.join(inference_base_folder, "preds.npz")
+    np.savez(save_path, coords=pred_coords, eot=pred_eot, frame_indices=frame_indices)
 
 
 def create_inference_example(trajectory_2d: torch.Tensor, intrinsics: torch.Tensor, extrinsics: torch.Tensor):
@@ -88,3 +108,6 @@ def create_inference_example(trajectory_2d: torch.Tensor, intrinsics: torch.Tens
     batch = (inputs, coord_labels, eot_labels, bounce_token_labels, lengths, intrinsics.unsqueeze(0), extrinsics.unsqueeze(0), diameters)
     return batch
 
+
+if __name__ == "__main__":
+    main()

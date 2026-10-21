@@ -1,9 +1,9 @@
+from ball_detection.model import TrackNet
+from ball_detection.paths import ProjectPaths
+from ball_detection import settings
+from ball_detection.trainer import train_and_evaluate_model, RunType
 import torch
-from model import TrackNet
-from paths import ProjectPaths
 import sys
-from trainer import train_and_evaluate_model, RunType
-import settings
 
 # TODO: Save model after every single epoch; compare checkpoints at the end; 
 

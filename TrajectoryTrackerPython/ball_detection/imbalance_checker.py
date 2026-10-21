@@ -1,7 +1,7 @@
+from ball_detection.paths import ProjectPaths
 import cv2
 import numpy as np
 import os
-from paths import ProjectPaths
 
 class_count_dict = dict([(c, 0) for c in range(256)]) # keys are classes (0-255), values are number of times each class appears
 total_pixel_count = 0

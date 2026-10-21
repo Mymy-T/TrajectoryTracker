@@ -1,8 +1,8 @@
+from ball_detection import settings
 import cv2
 import numpy as np
 import torch
 import torch.nn as nn
-import settings
 
 # Credit to yastrebksv's implementation of TrackNet on github: https://github.com/yastrebksv/TrackNet/blob/main/model.py
 

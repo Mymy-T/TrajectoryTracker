@@ -1,7 +1,7 @@
+from ball_detection.paths import ProjectPaths
+from ball_detection import settings
 import os
-from paths import ProjectPaths
 import re
-import settings
 import sys
 import yt_dlp
 

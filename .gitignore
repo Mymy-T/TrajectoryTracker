@@ -6,3 +6,14 @@
 .venv/
 __pycache__/
 .vscode/
+
+# Ignore some specific files
+sample_img_overlay.png
+sample_img.png
+trajectory_reconstruction.pdf
+
+# Large generated data (regenerate with convert_2d_to_3d/data_pipeline.py)
+TrajectoryTrackerPython/convert_2d_to_3d/raw_data/
+TrajectoryTrackerPython/convert_2d_to_3d/processed_data/
+TrajectoryTrackerPython/convert_2d_to_3d/model_saves/*/checkpoints/
+TrajectoryTrackerPython/full_inference_results/

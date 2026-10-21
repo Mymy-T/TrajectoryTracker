@@ -1,9 +1,9 @@
+from ball_detection.paths import ProjectPaths
 import cv2
 import math
 import numpy as np
 import os
 from pathlib import Path
-from paths import ProjectPaths
 
 def create_processed_dataset(data_path, processed_data_path, inference_threshold=100):
     H = 1080

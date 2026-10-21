@@ -1,12 +1,12 @@
-from dataset import TrackNetDataset, DatasetType
-from inference import load_model
-from model import TrackNet
+from ball_detection.dataset import TrackNetDataset, DatasetType
+from ball_detection.inference import load_model
+from ball_detection.model import TrackNet
+from ball_detection.paths import ProjectPaths
+from ball_detection import settings
+from ball_detection import trainer
 import os
-from paths import ProjectPaths
 import sys
 from torch.utils.data import DataLoader
-import trainer
-import settings
 
 device = settings.device
 

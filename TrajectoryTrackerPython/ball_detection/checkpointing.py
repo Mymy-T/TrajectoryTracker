@@ -1,6 +1,6 @@
+from ball_detection import settings
 import os
 import torch
-import settings
 
 device = settings.device
 

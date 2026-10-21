@@ -1,9 +1,9 @@
+from ball_detection.paths import ProjectPaths
 from enum import Enum
 import math
 import numpy as np
 import os
 import pandas as pd
-from paths import ProjectPaths
 
 class DataSplitMode(Enum):
     match_border = 0 # Split only at match-level
