@@ -30,6 +30,8 @@ class Paths:
         self.model_saves_folder = os.path.join(base_folder, "model_saves")
         self.logs_folder = os.path.join(base_folder, "logs")
 
+        self.inference_trajectory_path = os.path.join(base_folder, "inference.npz")
+
         # TODO: Move the sample_img.png into the keypoints folder; each img/keypoint set should be its own subfolder within keypoints folder
 
 

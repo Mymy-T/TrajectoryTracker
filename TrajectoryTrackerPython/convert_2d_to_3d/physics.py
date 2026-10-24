@@ -247,7 +247,7 @@ class PhysicsSimulation():
 
 
     # MARK: Compute Accelerations
-    def _compute_accelerations(self, v, w):
+    def compute_accelerations(self, v, w):
         m = self.ball_properties.m
         A = self.ball_properties.A
         I = self.ball_properties.I
@@ -467,7 +467,7 @@ class PhysicsSimulation():
         t = 0.0
         while t < max_time:
             prev_pos = pos.copy() # Copy needed; pos is updated in place below
-            a, alpha = self._compute_accelerations(v, w)
+            a, alpha = self.compute_accelerations(v, w)
 
             pos += v * dt
             v += a * dt
@@ -500,7 +500,7 @@ class PhysicsSimulation():
         state = self.ball_state
         dt = self.gen_settings.simulation_timestep
 
-        a, alpha = self._compute_accelerations(state.velocity, state.spin)
+        a, alpha = self.compute_accelerations(state.velocity, state.spin)
 
         state.position += state.velocity * dt
         state.velocity += a * dt
@@ -519,22 +519,22 @@ class PhysicsSimulation():
         w1 = state.spin
 
         k1_x = state.velocity
-        k1_v, k1_w = self._compute_accelerations(v1, w1)
+        k1_v, k1_w = self.compute_accelerations(v1, w1)
 
         v2 = v1 + 0.5 * dt * k1_v
         w2 = w1 + 0.5 * dt * k1_w
         k2_x = v2
-        k2_v, k2_w = self._compute_accelerations(v2, w2)
+        k2_v, k2_w = self.compute_accelerations(v2, w2)
 
         v3 = v1 + 0.5 * dt * k2_v
         w3 = w1 + 0.5 * dt * k2_w
         k3_x = v3
-        k3_v, k3_w = self._compute_accelerations(v3, w3)
+        k3_v, k3_w = self.compute_accelerations(v3, w3)
 
         v4 = v1 + dt * k3_v
         w4 = w1 + dt * k3_w
         k4_x = v4
-        k4_v, k4_w = self._compute_accelerations(v4, w4)
+        k4_v, k4_w = self.compute_accelerations(v4, w4)
 
         x_next = x1 + (dt / 6.0) * (k1_x + 2.0 * k2_x + 2.0 * k3_x + k4_x)
         v_next = v1 + (dt / 6.0) * (k1_v + 2.0 * k2_v + 2.0 * k3_v + k4_v)

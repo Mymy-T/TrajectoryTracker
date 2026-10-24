@@ -6,21 +6,27 @@ from convert_2d_to_3d.settings import device
 from convert_2d_to_3d.trainer import read_batch
 from convert_2d_to_3d.visualizer import plot_3d_trajectory
 import matplotlib.pyplot as plt
+import numpy as np
 import os
 import torch
 from torch.utils.data import DataLoader
 
+# python3 -m convert_2d_to_3d.inference --name first_trial --plot
 
 def main():
     parser = argparse.ArgumentParser(description="Run various types of inference.")
     parser.add_argument("--name", required=True, help="Name of the FULL model to run; don't include extensions")
+    parser.add_argument("--plot", action="store_true", help="Plot the prediction and actual trajectories immediately after running concludes.")
     args = parser.parse_args()
 
     pred_coords, pred_eot, coord_labels, eot_labels = run_model(args.name)
-    plot(pred_coords, pred_eot, coord_labels, eot_labels)
+    save_trajectory_3d(pred_coords, pred_eot, coord_labels, eot_labels)
+    
+    if args.plot:
+        plot(pred_coords, pred_eot, coord_labels, eot_labels)
 
 
-def run_model(model_name, inference_example: tuple = None): # TODO: Split into helper functions (e.g. loading, running model/consolidating results); hook up entire pipeline (ball detection -> 3d trajectory)
+def run_model(model_name, inference_example: tuple = None):
     """
     model_name is just the name of the saved model folder, without any extensions or parent folders
     """
@@ -53,14 +59,21 @@ def run_model(model_name, inference_example: tuple = None): # TODO: Split into h
     return pred_coords, pred_eot, coord_labels, eot_labels
 
 
-# TODO: Split into inference and data loading/pass in
+def save_trajectory_3d(pred_coords: np.ndarray, pred_eot: np.ndarray, coord_labels: np.ndarray, eot_labels: np.ndarray):
+    """
+    - pred_coords and coord_labels are (L, 3)
+    - pred_eot and eot_labels are (L,)
+    """
+    save_path = Paths().inference_trajectory_path
+    np.savez(save_path, coords=pred_coords, eot=pred_eot, coord_labels=coord_labels, eot_labels=eot_labels)
+
 
 def plot(pred_coords, pred_eot, coord_labels=None, eot_labels=None):
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 4), subplot_kw={"projection": "3d"})
 
     plot_3d_trajectory(pred_coords, pred_eot, ax1, label="Prediction")
-    
+
     if coord_labels is not None and eot_labels is not None:
         plot_3d_trajectory(coord_labels, eot_labels, ax2, label="Actual")
 
