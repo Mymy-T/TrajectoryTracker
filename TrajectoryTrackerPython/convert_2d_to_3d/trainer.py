@@ -225,7 +225,7 @@ def _train_epoch(model, optimizer, loss_fn, train_loader, epoch, resume_batch_id
     
 
 # MARK: Evaluate
-def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
+def evaluate(model: TypedModel, loss_fn, data_loader, valid, true_bounces=False, verbose=True):
 
     model.eval()
     num_batches = len(data_loader)
@@ -244,7 +244,11 @@ def evaluate(model: TypedModel, loss_fn, data_loader, valid, verbose=True):
 
             if model.model_type == ModelType.FullModel:
 
-                pred_coords, pred_eot, pred_intermediate_heights = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
+                if true_bounces:
+                    pred_coords, pred_eot, pred_intermediate_heights = model(inputs, lengths, intrinsics, extrinsics, diameters, bounce_token_labels) # (N, L, 3), (N, L, 1)
+                else:
+                    pred_coords, pred_eot, pred_intermediate_heights = model(inputs, lengths, intrinsics, extrinsics, diameters) # (N, L, 3), (N, L, 1)
+
                 loss, computed_loss_components = loss_fn(pred_coords, pred_eot, pred_intermediate_heights, coord_labels, eot_labels, lengths)
 
             elif model.model_type == ModelType.BounceModel:

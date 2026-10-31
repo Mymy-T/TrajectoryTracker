@@ -118,8 +118,10 @@ class HeightLoss(nn.Module): # A loss for the intermediate heights within the ne
 
 class TrajectoryLoss(nn.Module):
 
-    def __init__(self):
+    def __init__(self, return_vector=False):
         super().__init__()
+
+        self.return_vector = return_vector
 
 
     def forward(self, pred, target, lengths):
@@ -130,8 +132,15 @@ class TrajectoryLoss(nn.Module):
         sq_diffs = F.mse_loss(pred, target, reduction="none") # (N, L, 3)
         per_timestep_error = torch.sum(sq_diffs, dim=-1) # (N, L) 
         mask = _build_length_mask(lengths, per_timestep_error.shape[1]) # (N, L)
-        mse = per_timestep_error[mask].sum() / mask.sum().clamp(min=1)
-        return mse
+
+        if not self.return_vector:
+            mse = per_timestep_error[mask].sum() / mask.sum().clamp(min=1) # Scalar
+        else:
+            sse_vector = torch.where(mask, per_timestep_error, 0.0).sum(dim=-1) # (N,); mask index flattens it so dim=-1 works wrong
+            denom_vector = mask.sum(dim=-1).clamp(min=1)
+            mse = sse_vector / denom_vector # (N,)
+        
+        return mse # Scalar for most purposes, only vector of length N if corresponding arg passed
 
 
 class BelowGroundLoss(nn.Module):

@@ -84,7 +84,7 @@ class TrajectoryReconstructionNetwork(nn.Module, TypedModel):
 
     def __init__(self, saved_bounce_model_name: str = None):
         """
-        saved_bounce_model_name is just the name of the saved model folder, without any extensions or parent folders
+        saved_bounce_model_name is just the name of the saved model folder, without any extensions or parent folders (include _bm though)
         """
         super().__init__()
 
