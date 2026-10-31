@@ -33,7 +33,7 @@ class DataSplitMode(Enum):
     no_border = 1 # Split anywhere
 
 
-@dataclass(frozen=True)
+@dataclass
 class SyntheticDataGeneration:
 
     # NUMBER OF TRAJECTORIES

@@ -309,12 +309,12 @@ def project_trajectory_to_2d(trajectory: np.ndarray, projection_matrix: np.ndarr
     return np.stack(projected_trajectory, axis=0).astype(np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
 
 
-def obtain_projected_diameters(trajectory: np.ndarray, intrinsics: np.ndarray, extrinsics: np.ndarray):
+def obtain_projected_diameters(trajectory: np.ndarray, intrinsics: np.ndarray, extrinsics: np.ndarray, *, all_diameters=False):
     """
     trajectory is ndarray of 3D points
     intrinsics is (3, 3) ndarray
     extrinsics is (4, 4) ndarray
-    Returns a (2,) ndarray of the diameters for the initial and final frames
+    Returns a (2,) ndarray of the diameters for the initial and final frames IF all_diameters is False or not passed; otherwise returns (L,) ndarray of diamaters at all trajectory points
     """
 
     r = BallProperties().R
@@ -351,13 +351,26 @@ def obtain_projected_diameters(trajectory: np.ndarray, intrinsics: np.ndarray, e
         return diameter
     
 
-    first_point = trajectory[0, :] # Both (3,)
-    last_point = trajectory[-1, :]
+    if not all_diameters:
 
-    d_o = obtain_projected_diameter(S=first_point, C=T)
-    d_f = obtain_projected_diameter(S=last_point, C=T)
+        first_point = trajectory[0, :] # Both (3,)
+        last_point = trajectory[-1, :]
 
-    return np.array([d_o, d_f]).astype(np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
+        d_o = obtain_projected_diameter(S=first_point, C=T)
+        d_f = obtain_projected_diameter(S=last_point, C=T)
+
+        return np.array([d_o, d_f]).astype(np.float64) # Always saved at full precision; downcast happens only when loaded (see dataset.py)
+    else:
+
+        diameters = []
+
+        for i in range(len(trajectory)):
+            point = trajectory[i, :] # (3,)
+            d = obtain_projected_diameter(S=point, C=T)
+            diameters.append(d)
+        
+        return np.array(diameters).astype(np.float64)
+
 
 if __name__ == "__main__":
     paths = Paths()
@@ -373,7 +386,7 @@ if __name__ == "__main__":
         print(f"Camera position in world coords: {T}")
 
     if extrinsics is not None:
-        trajectory, _, _ = generate_sample_trajectory()
+        trajectory, _, _, _ = generate_sample_trajectory()
         projection_matrix = create_projection_matrix(simplified_intrinsics=intrinsics, extrinsics=extrinsics)
         projected_trajectory = project_trajectory_to_2d(trajectory, projection_matrix)
 
