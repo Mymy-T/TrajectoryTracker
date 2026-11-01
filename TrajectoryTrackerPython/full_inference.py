@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--dm", required=True, help="Name of the ball detection model. Don't add file extensions.")
     parser.add_argument("--fm", required=True, help="Name of the full 2d to 3D model. Don't add file extensions.")
     parser.add_argument("--video", default="video", help="Name of video to analyze within full_inference_results. Don't add extension.")
+    parser.add_argument("--plot", action="store_true", help="Plot the predicted trajectory immediately afterwards.")
     args = parser.parse_args()
 
     inference_base_folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "full_inference_results")
@@ -26,7 +27,9 @@ def main():
 
     pred_coords, pred_eot, frame_indices = run_inference(args, inference_base_folder)
     save_trajectory_3d(pred_coords, pred_eot, frame_indices, inference_base_folder)
-    plot(pred_coords, pred_eot)
+
+    if args.plot:
+        plot(pred_coords, pred_eot)
 
 
 def run_inference(args, inference_base_folder):

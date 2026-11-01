@@ -1,4 +1,4 @@
-from convert_2d_to_3d.data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, TrajectoryGenerationSettings, ShotType, TrajectoryMode, ShotDistribution
+from convert_2d_to_3d.data_models import BallState, BallProperties, BounceProperties, CourtProperties, EnvironmentProperties, FHInitialDistributionParameters, TrajectoryGenerationSettings, ShotType, TrajectoryMode, ShotDistribution
 from convert_2d_to_3d.settings import SyntheticDataGeneration
 from convert_2d_to_3d.visualizer import plot_3d_trajectory
 import copy
@@ -555,6 +555,9 @@ def _get_shot_distribution(generation_settings: TrajectoryGenerationSettings, sh
 
 # MARK: Example Trajectory
 def generate_sample_trajectory():
+    """
+    Generates a trajectory with exaggerated spin effects
+    """
     l = CourtProperties().court_length
     w = CourtProperties().court_width
     x_i = np.array([-l/2, 1, -w/4]).astype(float)
@@ -563,6 +566,38 @@ def generate_sample_trajectory():
     ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
     simulation = PhysicsSimulation(initial_state=ball_state, data_gen_settings=SyntheticDataGeneration()) # trajectory, times, eot, bounce_tokens
     return simulation.compute_3d_trajectory()
+
+
+def generate_test_trajectory():
+    """
+    Generates a realistic trajectory
+    """
+    l = CourtProperties().court_length
+
+    x_i = np.array([-l/2, 1, 0]).astype(float)
+    v_i = get_test_trajectory_velocity()
+    spin_i = get_test_trajectory_spin()
+    ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
+
+    gen_settings = SyntheticDataGeneration()
+    gen_settings.trajectory_generation_settings.mode = TrajectoryMode.NO_BOUNCE
+    simulation = PhysicsSimulation(initial_state=ball_state, data_gen_settings=gen_settings)
+
+    trajectory, _, _, _ = simulation.compute_3d_trajectory() # trajectory, times, eot, bounce_tokens
+
+    return trajectory # (L, 3)
+
+
+def get_test_trajectory_velocity():
+    fh_dist = FHInitialDistributionParameters()
+    v_i = fh_dist.v_mu
+    v_i[0] += 10 # Just to extend trajectory so it lands near the opposite edge of court
+    return v_i
+
+def get_test_trajectory_spin():
+    fh_dist = FHInitialDistributionParameters()
+    spin_i = fh_dist.w_mu
+    return spin_i
 
 
 # MARK: Random Trajectory
@@ -630,17 +665,23 @@ def interpolate_to_new_timestep(trajectory: np.ndarray, eot: np.ndarray, bounce_
     new_trajectory = np.stack(new_trajectory, axis=0, dtype=np.float64)
 
     # EOT - floored to be timestep before event
-    eot_indices = np.nonzero(eot)[0]
-    new_eot_indices = np.floor(eot_indices * dt_0 / dt_1).astype(int)
-    new_eot = np.zeros((M,), dtype=np.float64)
-    new_eot[new_eot_indices] = 1.0
+    if eot is not None:
+        eot_indices = np.nonzero(eot)[0]
+        new_eot_indices = np.floor(eot_indices * dt_0 / dt_1).astype(int)
+        new_eot = np.zeros((M,), dtype=np.float64)
+        new_eot[new_eot_indices] = 1.0
+    else:
+        new_eot = np.zeros((M,), dtype=np.float64)
 
     # Bounce Tokens - rounded to nearest timestep
-    bounce_token_indicies = np.nonzero(bounce_tokens)[0]
-    new_bounce_token_indicies = np.round(bounce_token_indicies * dt_0 / dt_1).astype(int)
-    new_bounce_token_indicies = new_bounce_token_indicies[new_bounce_token_indicies < M] # Last bounce would be rounded to a timestep after the interpolated trajectory ended
-    new_bounce_tokens = np.zeros((M,), dtype=np.float64)
-    new_bounce_tokens[new_bounce_token_indicies] = 1.0
+    if bounce_tokens is not None:
+        bounce_token_indicies = np.nonzero(bounce_tokens)[0]
+        new_bounce_token_indicies = np.round(bounce_token_indicies * dt_0 / dt_1).astype(int)
+        new_bounce_token_indicies = new_bounce_token_indicies[new_bounce_token_indicies < M] # Last bounce would be rounded to a timestep after the interpolated trajectory ended
+        new_bounce_tokens = np.zeros((M,), dtype=np.float64)
+        new_bounce_tokens[new_bounce_token_indicies] = 1.0
+    else:
+        new_bounce_tokens = np.zeros((M,), dtype=np.float64)
 
     return new_trajectory, new_eot, new_bounce_tokens
 

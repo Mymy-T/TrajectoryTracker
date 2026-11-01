@@ -1,1 +1,1 @@
-# TODO: Import video, intrinsics, extrinsics if flagged to import, models, etc
+# TODO: Import video, intrinsics, extrinsics if flagged to import, models, etc; automate inference setup

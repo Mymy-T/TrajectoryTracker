@@ -11,7 +11,7 @@ import os
 import torch
 from torch.utils.data import DataLoader
 
-# python3 -m convert_2d_to_3d.inference --name first_trial --plot
+# python3 -m convert_2d_to_3d.inference --name first_trial
 
 def main():
     parser = argparse.ArgumentParser(description="Run various types of inference.")
@@ -72,13 +72,13 @@ def plot(pred_coords, pred_eot, coord_labels=None, eot_labels=None):
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 4), subplot_kw={"projection": "3d"})
 
-    plot_3d_trajectory(pred_coords, pred_eot, ax1, label="Prediction")
+    plot_3d_trajectory(pred_coords, pred_eot, ax=ax1, color="b", label="Prediction")
 
     if coord_labels is not None and eot_labels is not None:
-        plot_3d_trajectory(coord_labels, eot_labels, ax2, label="Actual")
+        plot_3d_trajectory(coord_labels, eot_labels, ax=ax2, color="orange", label="Actual")
 
-        plot_3d_trajectory(coord_labels, eot_labels, ax3, color="b", label="Overlay", hide_legend=True)
-        plot_3d_trajectory(pred_coords, pred_eot, ax3, color="orange", label="Overlay", hide_legend=True)
+        plot_3d_trajectory(coord_labels, eot_labels, ax=ax3, color="b", label="Overlay", hide_legend=True)
+        plot_3d_trajectory(pred_coords, pred_eot, ax=ax3, color="orange", label="Overlay", hide_legend=True)
 
     plt.show()
 

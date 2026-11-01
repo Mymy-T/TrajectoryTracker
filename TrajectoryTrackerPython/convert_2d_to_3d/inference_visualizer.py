@@ -83,6 +83,11 @@ class InferenceVisualizerApp(tk.Tk):
         self.canvas = FigureCanvasTkAgg(self.fig, master=self)
         self.canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
+        # Constant over the whole trajectory, so it's computed once instead of in _draw_step
+        rmse = np.sqrt(np.mean(np.sum((self.pred_coords - self.coord_labels)**2, axis=1)))
+        self.rmse_label = ttk.Label(self, text=f"Trajectory RMSE: {rmse * 100:.0f} cm", font=("TkDefaultFont", 16))
+        self.rmse_label.pack(side=tk.TOP)
+
         playback_frame = ttk.Frame(self)
         playback_frame.pack(side=tk.TOP, fill=tk.X, padx=8, pady=8)
 

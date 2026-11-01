@@ -1,4 +1,5 @@
 import argparse
+from convert_2d_to_3d.projector import create_projection_matrix, obtain_base_extrinsics, obtain_base_intrinsics, project_trajectory_to_2d
 from convert_2d_to_3d.visualizer import plot_3d_trajectory
 import cv2
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -16,15 +17,18 @@ THREE_D_ZOOM = 1.3
 
 TRAJECTORY_FILENAME = "preds.npz" # Written by full_inference.py's save_trajectory_3d(); keys: coords (L, 3), eot (L,), frame_indices (L,)
 TRACKED_VIDEO_FILENAME = "annotated_video.mp4"
+INTRINSICS_FILENAME = "intrinsics.json"
+EXTRINSICS_FILENAME = "extrinsics.npy"
 
 
 def load_video_frames(video_path):
     """
-    Returns (frames, fps); frames is a list of RGB arrays at DISPLAY_IMAGE_SIZE
+    Returns (frames, fps, source_size); frames is a list of RGB arrays at DISPLAY_IMAGE_SIZE, source_size is the clip's original (width, height)
     All frames are kept in memory so the slider can jump to any frame instantly (seeking mp4v videos with CAP_PROP_POS_FRAMES is slow and not always frame-exact)
     """
     vidcap = cv2.VideoCapture(video_path)
     fps = vidcap.get(cv2.CAP_PROP_FPS)
+    source_size = (int(vidcap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(vidcap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
     frames = []
 
     success, img = vidcap.read()
@@ -34,7 +38,7 @@ def load_video_frames(video_path):
         success, img = vidcap.read()
 
     vidcap.release()
-    return frames, fps
+    return frames, fps, source_size
 
 
 def load_trajectory(trajectory_path):
@@ -49,11 +53,24 @@ def load_trajectory(trajectory_path):
     return data["coords"], data["eot"], data["frame_indices"].astype(int)
 
 
+def reproject_trajectory(coords, intrinsics_path, extrinsics_path, source_size):
+    """
+    Projects the 3D trajectory back into the clip with the same camera used for inference
+    - coords is (L, 3)
+    Returns (L, 2) pixel coords scaled to DISPLAY_IMAGE_SIZE
+    """
+    projection_matrix = create_projection_matrix(obtain_base_intrinsics(intrinsics_path), obtain_base_extrinsics(extrinsics_path))
+    projected = project_trajectory_to_2d(coords, projection_matrix) # (L, 2) in source pixels
+
+    scale = np.array(DISPLAY_IMAGE_SIZE) / np.array(source_size)
+    return projected * scale
+
+
 class InferenceVisualizerApp(tk.Tk):
-    def __init__(self, original_frames, tracked_frames, fps, trajectory):
+    def __init__(self, original_frames, tracked_frames, fps, trajectory, reprojected_points):
         super().__init__()
         self.title("Inference Visualizer")
-        self.geometry("1200x900")
+        self.geometry("1500x900")
 
         if len(original_frames) != len(tracked_frames):
             print(f"Warning: original clip has {len(original_frames)} frames but tracked video has {len(tracked_frames)}; only the first {min(len(original_frames), len(tracked_frames))} are shown")
@@ -63,6 +80,7 @@ class InferenceVisualizerApp(tk.Tk):
         self.num_frames = min(len(original_frames), len(tracked_frames))
         self.fps = fps
         self.trajectory = trajectory
+        self.reprojected_points = reprojected_points # (L, 2) in display pixels, same rows as trajectory; None if no trajectory
 
         # Maps video frame idx -> trajectory row; frames without a 3D estimate (eg the first 2 TrackNet frames) are absent
         self.frame_to_row = {} if trajectory is None else {frame_idx: row for row, frame_idx in enumerate(trajectory[2])}
@@ -78,11 +96,12 @@ class InferenceVisualizerApp(tk.Tk):
         self._draw_frame(0)
 
     def _build_widgets(self):
-        self.fig = Figure(figsize=(12, 8))
-        grid = self.fig.add_gridspec(2, 2, height_ratios=[1, 1.3])
+        self.fig = Figure(figsize=(15, 8))
+        grid = self.fig.add_gridspec(2, 3, height_ratios=[1, 1.3])
 
         self.ax_original = self.fig.add_subplot(grid[0, 0])
         self.ax_tracked = self.fig.add_subplot(grid[0, 1])
+        self.ax_reprojected = self.fig.add_subplot(grid[0, 2])
         self.ax_3d = self.fig.add_subplot(grid[1, :], projection="3d")
 
         # Images are created once and only have their data swapped per frame (see _draw_frame)
@@ -93,6 +112,12 @@ class InferenceVisualizerApp(tk.Tk):
         self.tracked_image = self.ax_tracked.imshow(self.tracked_frames[0])
         self.ax_tracked.set_title("Tracked ball")
         self.ax_tracked.axis("off")
+
+        self.reprojected_image = self.ax_reprojected.imshow(self.original_frames[0])
+        self.ax_reprojected.set_title("Reprojected 3D estimate")
+        self.ax_reprojected.axis("off")
+        self.ax_reprojected.set_autoscale_on(False) # keep the image's limits when the marker moves (or goes off-frame)
+        self.reprojected_marker, = self.ax_reprojected.plot([], [], "o", color="orange", markeredgecolor="black", markersize=8)
 
         if self.trajectory is None:
             self.ax_3d.text2D(0.5, 0.5, f"{TRAJECTORY_FILENAME} not found; run full_inference.py", transform=self.ax_3d.transAxes, ha="center")
@@ -134,15 +159,18 @@ class InferenceVisualizerApp(tk.Tk):
     def _draw_frame(self, frame_idx):
         self.original_image.set_data(self.original_frames[frame_idx])
         self.tracked_image.set_data(self.tracked_frames[frame_idx])
+        self.reprojected_image.set_data(self.original_frames[frame_idx])
 
         row = self.frame_to_row.get(frame_idx)
         if row is not None:
+            self.reprojected_marker.set_data([self.reprojected_points[row, 0]], [self.reprojected_points[row, 1]])
             coords = self.trajectory[0]
             trail = coords[:row + 1]
             self.trail_line.set_data_3d(trail[:, 0], trail[:, 2], trail[:, 1])
             self.position_marker.set_data_3d([coords[row, 0]], [coords[row, 2]], [coords[row, 1]])
             self.ax_3d.set_title(f"3D Trajectory (height {coords[row, 1]:.2f} m)")
         elif self.trajectory is not None:
+            self.reprojected_marker.set_data([], [])
             self.trail_line.set_data_3d([], [], [])
             self.position_marker.set_data_3d([], [], [])
             self.ax_3d.set_title("3D Trajectory (no 3D estimate for this frame)")
@@ -238,11 +266,17 @@ def main():
     if not os.path.exists(tracked_video_path):
         raise FileNotFoundError("Couldn't find tracked (annotated) video within full_inference_results; run full_inference.py first.")
 
-    original_frames, fps = load_video_frames(video_path)
-    tracked_frames, _ = load_video_frames(tracked_video_path)
+    original_frames, fps, source_size = load_video_frames(video_path)
+    tracked_frames, _, _ = load_video_frames(tracked_video_path)
     trajectory = load_trajectory(os.path.join(inference_base_folder, TRAJECTORY_FILENAME))
 
-    app = InferenceVisualizerApp(original_frames, tracked_frames, fps, trajectory)
+    reprojected_points = None
+    if trajectory is not None:
+        intrinsics_path = os.path.join(inference_base_folder, INTRINSICS_FILENAME)
+        extrinsics_path = os.path.join(inference_base_folder, EXTRINSICS_FILENAME)
+        reprojected_points = reproject_trajectory(trajectory[0], intrinsics_path, extrinsics_path, source_size)
+
+    app = InferenceVisualizerApp(original_frames, tracked_frames, fps, trajectory, reprojected_points)
     app.mainloop()
 
 

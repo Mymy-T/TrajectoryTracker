@@ -1,11 +1,9 @@
 import argparse
-from convert_2d_to_3d.data_models import BallState, CourtProperties, FHInitialDistributionParameters, TrajectoryGenerationSettings, TrajectoryMode
-from convert_2d_to_3d.paths import Paths
-from convert_2d_to_3d.physics import PhysicsSimulation
+from convert_2d_to_3d.data_models import BallState, CourtProperties, FHInitialDistributionParameters, TrajectoryMode
+from convert_2d_to_3d.physics import generate_test_trajectory
 from convert_2d_to_3d.projector import obtain_projected_diameters
 from convert_2d_to_3d.settings import SyntheticDataGeneration
 from convert_2d_to_3d.visualizer import plot_3d_trajectory
-from math import ceil, floor
 import matplotlib.pyplot as plt
 import numpy as np
 from tabulate import tabulate
@@ -70,7 +68,10 @@ def main():
 
         print(tabulate(data, headers=headers, tablefmt="grid"))
 
-        plot(diameters, trajectory, const_y_diameters, const_y_trajectory, CONSTANT_Y)
+        x = trajectory[:, 0]
+        x2 = const_y_trajectory[:, 0]
+
+        plot(diameters, x, const_y_diameters, x2, CONSTANT_Y)
 
 
 
@@ -90,40 +91,16 @@ def generate_constant_y_trajectory(y):
     return np.array(trajectory).astype(np.float64) # (L, 3)
 
 
-def generate_test_trajectory():
-    l = CourtProperties().court_length
-    w = CourtProperties().court_width
-    fh_dist = FHInitialDistributionParameters()
 
-    x_i = np.array([-l/2, 1, 0]).astype(float)
-    v_i = fh_dist.v_mu
-    v_i[0] += 10 # Just to extend trajectory so it lands near the opposite edge of court
-    spin_i = fh_dist.w_mu
-    ball_state = BallState(position=x_i, velocity=v_i, spin=spin_i)
-
-    gen_settings = SyntheticDataGeneration()
-    gen_settings.trajectory_generation_settings.mode = TrajectoryMode.NO_BOUNCE
-    simulation = PhysicsSimulation(initial_state=ball_state, data_gen_settings=gen_settings)
-
-    trajectory, _, _, _ = simulation.compute_3d_trajectory() # trajectory, times, eot, bounce_tokens
-
-    return trajectory # (L, 3)
-
-
-
-def plot(diameters: np.ndarray, trajectory: np.ndarray, const_y_diameters: np.ndarray, const_y_trajectory: np.ndarray, const_y: int):
+def plot(diameters: np.ndarray, x: np.ndarray, const_y_diameters: np.ndarray, x2: np.ndarray, const_y: int):
 
     fig, (ax, ax2) = plt.subplots(1, 2, sharex=True, sharey=True)
-
-    x = trajectory[:, 0]
 
     ax.scatter(x, diameters)
     ax.set_xlabel("Court X Position (m)")
     ax.set_ylabel("Projected Diameter (px)")
     ax.set_title("Real Trajectory")
     ax.set_ylim(LOWER_Y_LIM, UPPER_Y_LIM)
-
-    x2 = const_y_trajectory[:, 0]
 
     ax2.scatter(x2, const_y_diameters)
     ax2.set_xlabel("Court X Position (m)")

@@ -164,7 +164,7 @@ def _plot_fading_line_3d(ax, plot_x, plot_y, plot_z, fade_window, label=None, co
     ax.add_collection3d(Line3DCollection(segments, colors=colors, linewidth=2, label=label))
 
 
-def plot_3d_trajectory(trajectory, eot=None, ax=None, fade_window=None, color="b", label="3D Trajectory", hide_legend=False):
+def plot_3d_trajectory(trajectory, eot=None, *, ax=None, fade_window=None, color="b", label="3D Trajectory", hide_legend=False):
     """
     If ax is None, creates a new figure/3D axes and calls plt.show() at the end (standalone use);
     else, draws onto it and leaves creating/showing the figure to the caller (eg for embedding in GUI)
